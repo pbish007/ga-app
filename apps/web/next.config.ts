@@ -10,7 +10,9 @@ const nextConfig: NextConfig = {
   transpilePackages: [
     "@ga/accounts",
     "@ga/aircraft",
+    "@ga/compliance",
     "@ga/db",
+    "@ga/notifications",
     "@ga/regime",
     "@ga/storage",
   ],

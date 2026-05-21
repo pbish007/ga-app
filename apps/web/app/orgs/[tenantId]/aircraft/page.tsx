@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { sql } from "drizzle-orm";
 
 import { AircraftService, type AircraftDb } from "@ga/aircraft";
 import { hasPermission } from "@ga/accounts";
+import { executeRows } from "@ga/notifications";
 
 import { runPage } from "../../../../lib/page-auth";
 import {
@@ -54,18 +56,37 @@ export default async function AircraftListPage({
 }) {
   const { tenantId } = await params;
 
-  const { aircraft, canWrite } = await runPage(
+  const { aircraft, canWrite, alertCounts } = await runPage(
     tenantId,
     "aircraft.read",
     async (tx, ctx) => {
       const svc = new AircraftService(tx as unknown as AircraftDb);
       const rows = await svc.listForTenant(ctx.tenantId);
+      const counts = await executeRows<{ level: string; count: string }>(
+        tx,
+        sql`
+          select level, count(*)::text as count
+            from notifications
+           where user_id = ${ctx.userId}
+             and seen_at is null
+           group by level
+        `,
+      );
+      const byLevel = Object.fromEntries(
+        counts.map((r) => [r.level, Number(r.count)]),
+      );
       return {
         aircraft: rows,
         canWrite: hasPermission(ctx.membership, "aircraft.write"),
+        alertCounts: {
+          overdue: byLevel.overdue ?? 0,
+          dueSoon: byLevel.due_soon ?? 0,
+        },
       };
     },
   );
+
+  const totalAlerts = alertCounts.overdue + alertCounts.dueSoon;
 
   return (
     <main style={s.main}>
@@ -91,6 +112,35 @@ export default async function AircraftListPage({
         )}
       </div>
       <p style={s.muted}>{aircraft.length} on file</p>
+
+      {totalAlerts > 0 && (
+        <Link
+          href={`/orgs/${tenantId}/alerts`}
+          data-testid="alerts-banner"
+          style={{
+            display: "block",
+            padding: "0.75rem 1rem",
+            background: alertCounts.overdue > 0 ? "#fef2f2" : "#fffbeb",
+            border: `1px solid ${alertCounts.overdue > 0 ? "#dc2626" : "#d97706"}`,
+            borderRadius: 8,
+            margin: "1rem 0",
+            textDecoration: "none",
+            color: "inherit",
+            minHeight: 44,
+          }}
+        >
+          <strong style={{ color: alertCounts.overdue > 0 ? "#991b1b" : "#92400e" }}>
+            {alertCounts.overdue > 0
+              ? `${alertCounts.overdue} overdue`
+              : null}
+            {alertCounts.overdue > 0 && alertCounts.dueSoon > 0 ? ", " : ""}
+            {alertCounts.dueSoon > 0 ? `${alertCounts.dueSoon} due soon` : null}
+          </strong>{" "}
+          <span style={{ fontSize: "0.9rem", color: "#444" }}>
+            — open alerts →
+          </span>
+        </Link>
+      )}
 
       {aircraft.length === 0 ? (
         <p style={{ marginTop: "2rem" }}>
