@@ -58,7 +58,18 @@ There is no separate deploy step — **a push to `main` deploys.** That is the d
 
 ### Environment
 
-Nothing required yet. The `/health` route surfaces `VERCEL_GIT_COMMIT_SHA` when running on Vercel and `"local"` otherwise; both work without any env vars.
+Local: copy `.env.example` to `apps/web/.env.local` and fill in the values. The file is gitignored by default — never commit a real connection string.
+
+Production: every variable in `.env.example` MUST be set in the Vercel project's environment (Production scope). Vercel injects them at build and runtime. No secrets live in the repo.
+
+Today's vars:
+
+| Var | Required | Set by | Read by |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | yes (once Neon is provisioned) | Vercel env + `.env.local` | `packages/db/src/env.ts` |
+| `DATABASE_URL_DIRECT` | yes for migrations / restore work | same | ops scripts only |
+
+See `docs/runbooks/postgres-restore.md` for the full provisioning + restore playbook.
 
 ## Conventions
 

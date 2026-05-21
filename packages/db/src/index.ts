@@ -1,4 +1,10 @@
 export * as schema from "./schema/index.js";
+export {
+  MissingDatabaseUrlError,
+  assertSslRequired,
+  getDatabaseUrl,
+  requireDatabaseUrl,
+} from "./env.js";
 export type {
   AppRoleCode,
   EmailOutboxMessage,
