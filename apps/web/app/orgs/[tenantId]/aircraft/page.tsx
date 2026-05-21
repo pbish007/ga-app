@@ -15,6 +15,38 @@ interface PageParams {
   tenantId: string;
 }
 
+const listStyles = {
+  list: {
+    listStyle: "none",
+    margin: "1rem 0 0",
+    padding: 0,
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "0.75rem",
+  },
+  card: {
+    display: "block",
+    padding: "0.85rem 1rem",
+    border: "1px solid #ddd",
+    borderRadius: 8,
+    textDecoration: "none",
+    color: "inherit",
+    background: "white",
+    /* ensure at least 44px tap height */
+    minHeight: 44,
+  },
+  cardReg: {
+    fontWeight: 700,
+    fontSize: "1.05rem",
+    color: "#2563eb",
+    marginBottom: "0.15rem",
+  },
+  cardMeta: {
+    fontSize: "0.875rem",
+    color: "#666",
+  },
+};
+
 export default async function AircraftListPage({
   params,
 }: {
@@ -37,64 +69,54 @@ export default async function AircraftListPage({
 
   return (
     <main style={s.main}>
-      <h1 style={s.h1}>Aircraft</h1>
-      <p style={s.muted}>{aircraft.length} on file</p>
-
-      {canWrite ? (
-        <p style={{ marginTop: "1.5rem" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "1rem",
+          flexWrap: "wrap" as const,
+          marginBottom: "0.5rem",
+        }}
+      >
+        <h1 style={{ ...s.h1, marginBottom: 0 }}>Aircraft</h1>
+        {canWrite && (
           <Link
             href={`/orgs/${tenantId}/aircraft/new`}
-            style={s.link}
+            style={s.buttonLink}
             data-testid="new-aircraft-link"
           >
             + Add aircraft
           </Link>
-        </p>
-      ) : null}
+        )}
+      </div>
+      <p style={s.muted}>{aircraft.length} on file</p>
 
       {aircraft.length === 0 ? (
         <p style={{ marginTop: "2rem" }}>
           No aircraft yet.
           {canWrite
-            ? " Add the first one using the link above."
+            ? " Add the first one using the button above."
             : " Ask an administrator to add one."}
         </p>
       ) : (
-        <div style={s.tableWrap}>
-          <table style={s.table}>
-            <thead>
-              <tr>
-                <th style={s.th}>Registration</th>
-                <th style={s.th}>Make / Model</th>
-                <th style={s.th}>S/N</th>
-                <th style={s.th}>Year</th>
-                <th style={s.th}>Airframe TT</th>
-                <th style={s.th}>Time source</th>
-              </tr>
-            </thead>
-            <tbody>
-              {aircraft.map((a) => (
-                <tr key={a.id}>
-                  <td style={s.td}>
-                    <Link
-                      href={`/orgs/${tenantId}/aircraft/${a.id}`}
-                      style={s.link}
-                    >
-                      {a.registration}
-                    </Link>
-                  </td>
-                  <td style={s.td}>
-                    {a.make} {a.model}
-                  </td>
-                  <td style={s.td}>{a.serialNumber}</td>
-                  <td style={s.td}>{a.yearManufactured ?? "—"}</td>
-                  <td style={s.td}>{Number(a.airframeTotalTime).toFixed(1)}</td>
-                  <td style={s.td}>{a.timeSource}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ul style={listStyles.list}>
+          {aircraft.map((a) => (
+            <li key={a.id}>
+              <Link
+                href={`/orgs/${tenantId}/aircraft/${a.id}`}
+                style={listStyles.card}
+              >
+                <div style={listStyles.cardReg}>{a.registration}</div>
+                <div style={listStyles.cardMeta}>
+                  {a.make} {a.model}
+                  {a.yearManufactured ? ` · ${a.yearManufactured}` : ""} ·{" "}
+                  {Number(a.airframeTotalTime).toFixed(1)} hrs
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
 
       <p style={s.legalCaution}>{NOT_AIRWORTHINESS_CAUTION}</p>

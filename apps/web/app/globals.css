@@ -10,8 +10,32 @@ body {
   padding: 0;
   background: #fafafa;
   color: #111;
+  /* Prevent font scaling in landscape on iOS */
+  -webkit-text-size-adjust: 100%;
 }
 
 a {
   color: #0f62fe;
+}
+
+/* Smooth tap response — removes 300 ms delay on iOS */
+a,
+button,
+[role="button"] {
+  touch-action: manipulation;
+}
+
+button {
+  font-family: inherit;
+}
+
+img,
+video {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Prevent horizontal overflow from blowing out mobile viewports */
+body {
+  overflow-x: hidden;
 }

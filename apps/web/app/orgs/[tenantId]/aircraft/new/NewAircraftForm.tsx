@@ -127,7 +127,7 @@ export function NewAircraftForm({ tenantId }: Props) {
         </label>
         <label style={s.field}>
           <span style={s.label}>Time source</span>
-          <select name="time_source" required style={s.input} defaultValue="hobbs">
+          <select name="time_source" required style={s.select} defaultValue="hobbs">
             <option value="hobbs">Hobbs</option>
             <option value="tach">Tach</option>
           </select>
