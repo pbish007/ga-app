@@ -58,6 +58,14 @@ export type {
   NewAircraft,
 } from "./schema/aircraft.js";
 export { AIRCRAFT_TIME_SOURCES } from "./schema/aircraft.js";
+export type {
+  Component,
+  ComponentInstallation,
+  ComponentKind,
+  NewComponent,
+  NewComponentInstallation,
+} from "./schema/components.js";
+export { COMPONENT_KINDS } from "./schema/components.js";
 export { setupTestDb, type TestDb } from "./test/pglite.js";
 export {
   TENANT_APP_ROLE,

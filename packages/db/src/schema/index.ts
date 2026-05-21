@@ -4,3 +4,4 @@ export * from "./documents.js";
 export * from "./roles.js";
 export * from "./credentials.js";
 export * from "./aircraft.js";
+export * from "./components.js";
