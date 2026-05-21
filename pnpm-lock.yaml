@@ -22,6 +22,9 @@ importers:
       '@ga/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@ga/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
       '@ga/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -130,6 +133,31 @@ importers:
 
   packages/db:
     dependencies:
+      drizzle-orm:
+        specifier: 0.36.4
+        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/react@19.0.2)(postgres@3.4.5)(react@19.0.0)
+    devDependencies:
+      '@electric-sql/pglite':
+        specifier: 0.2.14
+        version: 0.2.14
+      '@types/node':
+        specifier: 22.10.5
+        version: 22.10.5
+      typescript:
+        specifier: 5.7.2
+        version: 5.7.2
+      vitest:
+        specifier: 2.1.8
+        version: 2.1.8(@types/node@22.10.5)
+
+  packages/notifications:
+    dependencies:
+      '@ga/compliance':
+        specifier: workspace:*
+        version: link:../compliance
+      '@ga/db':
+        specifier: workspace:*
+        version: link:../db
       drizzle-orm:
         specifier: 0.36.4
         version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/react@19.0.2)(postgres@3.4.5)(react@19.0.0)
