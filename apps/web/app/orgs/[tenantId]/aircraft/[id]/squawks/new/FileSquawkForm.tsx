@@ -261,14 +261,17 @@ export function FileSquawkForm({ tenantId, aircraftId, registration }: Props) {
                   type="button"
                   onClick={() => removePhoto(i)}
                   disabled={submitting}
+                  aria-label={`Remove ${photo.filename}`}
                   style={{
                     background: "transparent",
                     border: "1px solid #d1d5db",
                     borderRadius: 4,
-                    padding: "0.25rem 0.55rem",
-                    fontSize: "0.85rem",
+                    padding: "0.5rem 0.75rem",
+                    fontSize: "0.9rem",
                     cursor: "pointer",
-                    minHeight: 32,
+                    minHeight: 44,
+                    minWidth: 44,
+                    touchAction: "manipulation",
                   }}
                 >
                   Remove

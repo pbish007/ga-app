@@ -302,6 +302,7 @@ function AirworthinessIndicator({ status }: { status: ComplianceStatus }) {
         display: "flex",
         alignItems: "center",
         gap: "0.75rem",
+        flexWrap: "wrap",
       }}
     >
       <span
@@ -310,7 +311,7 @@ function AirworthinessIndicator({ status }: { status: ComplianceStatus }) {
       >
         {status === "overdue" ? "✗" : status === "due_soon" ? "⚠" : "✓"}
       </span>
-      <div>
+      <div style={{ flex: "1 1 12rem", minWidth: 0 }}>
         <p
           style={{
             margin: 0,
@@ -325,9 +326,7 @@ function AirworthinessIndicator({ status }: { status: ComplianceStatus }) {
           Aircraft-level airworthiness indicator
         </p>
       </div>
-      <div style={{ marginLeft: "auto" }}>
-        <StatusBadge status={status} />
-      </div>
+      <StatusBadge status={status} />
     </div>
   );
 }
