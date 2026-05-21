@@ -35,15 +35,19 @@ export type {
 } from "./schema/roles.js";
 export { APP_PERMISSION_CODES } from "./schema/roles.js";
 export type {
+  InspectionCadenceKind,
+  InspectionIntervalKind,
   NewRegime,
   NewRegimeCredentialType,
   NewRegimeDirectiveSource,
+  NewRegimeInspectionProgramInterval,
   NewRegimeInspectionProgramTemplate,
   NewRegimeRetentionRule,
   NewRegimeRtsTemplate,
   Regime,
   RegimeCredentialType,
   RegimeDirectiveSource,
+  RegimeInspectionProgramInterval,
   RegimeInspectionProgramTemplate,
   RegimeRetentionRule,
   RegimeRtsTemplate,
@@ -54,8 +58,10 @@ export type {
 } from "./schema/credentials.js";
 export type {
   Aircraft,
+  AircraftInspectionSubscription,
   AircraftTimeSource,
   NewAircraft,
+  NewAircraftInspectionSubscription,
 } from "./schema/aircraft.js";
 export { AIRCRAFT_TIME_SOURCES } from "./schema/aircraft.js";
 export type {

@@ -16,6 +16,9 @@ importers:
       '@ga/aircraft':
         specifier: workspace:*
         version: link:../../packages/aircraft
+      '@ga/compliance':
+        specifier: workspace:*
+        version: link:../../packages/compliance
       '@ga/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -103,6 +106,18 @@ importers:
       '@electric-sql/pglite':
         specifier: 0.2.14
         version: 0.2.14
+      '@types/node':
+        specifier: 22.10.5
+        version: 22.10.5
+      typescript:
+        specifier: 5.7.2
+        version: 5.7.2
+      vitest:
+        specifier: 2.1.8
+        version: 2.1.8(@types/node@22.10.5)
+
+  packages/compliance:
+    devDependencies:
       '@types/node':
         specifier: 22.10.5
         version: 22.10.5
