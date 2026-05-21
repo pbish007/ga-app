@@ -11,6 +11,7 @@
     "start": "pnpm --filter web start",
     "lint": "pnpm -r --parallel lint",
     "typecheck": "pnpm -r --parallel typecheck",
-    "test": "pnpm -r --parallel test"
+    "test": "pnpm -r --parallel test",
+    "verify:tls": "node packages/db/scripts/check-tls.mjs"
   }
 }

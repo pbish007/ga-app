@@ -36,5 +36,20 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Verify TLS gate accepts a compliant URL
+        env:
+          DATABASE_URL: postgres://ci:ci@example.invalid/db?sslmode=require
+        run: pnpm verify:tls
+
+      - name: Verify TLS gate rejects a non-TLS URL
+        env:
+          DATABASE_URL: postgres://ci:ci@example.invalid/db?sslmode=disable
+        run: |
+          if pnpm verify:tls; then
+            echo "TLS gate should have rejected sslmode=disable" >&2
+            exit 1
+          fi
+          echo "TLS gate correctly rejected sslmode=disable"
+
       - name: Build
         run: pnpm build
