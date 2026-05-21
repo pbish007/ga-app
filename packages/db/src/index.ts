@@ -43,8 +43,10 @@ export type {
 } from "./schema/regime.js";
 export { setupTestDb, type TestDb } from "./test/pglite.js";
 export {
+  TENANT_APP_ROLE,
   TENANT_CONTEXT_GUC,
   clearTenantContext,
+  runAsTenant,
   setTenantContext,
   withTenantContext,
 } from "./test/tenant.js";

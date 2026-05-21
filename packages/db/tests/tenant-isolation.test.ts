@@ -29,11 +29,11 @@ const TENANT_B = "00000000-0000-0000-0000-0000000000b2";
 async function installTenantWidgetsFixture(db: TestDb) {
   // Postgres superusers bypass RLS regardless of FORCE ROW LEVEL SECURITY.
   // pglite defaults the connection role to a superuser, so to actually
-  // exercise the policy we create a non-superuser role, grant it the
-  // table, seed data as superuser, then SET ROLE to that role for the
-  // rest of the session. The convention is the same one production app
-  // code will follow: never run user-facing queries as a Postgres
-  // superuser.
+  // exercise the policy we grant a non-superuser role (`tenant_app`,
+  // created by migration 0004), seed data as superuser, then SET ROLE
+  // to that role for the rest of the session. The convention is the
+  // same one production app code will follow: never run user-facing
+  // queries as a Postgres superuser.
   //
   // Multi-statement DDL uses the underlying pglite `exec` (simple query
   // protocol). Drizzle's `execute` runs a prepared statement and rejects
@@ -53,7 +53,6 @@ async function installTenantWidgetsFixture(db: TestDb) {
       ('${TENANT_A}', 'a-1'),
       ('${TENANT_A}', 'a-2'),
       ('${TENANT_B}', 'b-1');
-    create role tenant_app nosuperuser nobypassrls;
     grant select, insert, update, delete on tenant_widgets to tenant_app;
     set role tenant_app;
   `);

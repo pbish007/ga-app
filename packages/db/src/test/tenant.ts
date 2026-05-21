@@ -14,6 +14,14 @@ import type { TestDb } from "./pglite.js";
 export const TENANT_CONTEXT_GUC = "app.current_tenant_id";
 
 /**
+ * Postgres role that every application connection MUST switch to before
+ * issuing user-facing queries. Defined in migration 0004 as
+ * NOSUPERUSER NOBYPASSRLS so that even a query that forgets to set the
+ * tenant GUC cannot read other tenants' rows.
+ */
+export const TENANT_APP_ROLE = "tenant_app";
+
+/**
  * Set the session-level tenant context for subsequent queries on this
  * connection. Parameterized via `set_config()` so the tenant id is bound,
  * not interpolated.
@@ -53,4 +61,40 @@ export async function withTenantContext<T>(
   } finally {
     await clearTenantContext(db);
   }
+}
+
+/**
+ * Bypass-proof tenant scope for production request handlers.
+ *
+ * Opens a transaction and, *inside* it, pins both the tenant GUC and the
+ * effective role as LOCAL settings:
+ *
+ *   * `SET LOCAL app.current_tenant_id = <tenantId>` — RLS predicates can
+ *     now match rows.
+ *   * `SET LOCAL ROLE tenant_app` — drops the connection's superuser
+ *     privileges so even a query that forgets the GUC will hit FORCE
+ *     ROW LEVEL SECURITY and return zero rows.
+ *
+ * LOCAL settings unwind automatically when the transaction commits or
+ * rolls back — there is no way to leak a tenant context or an elevated
+ * role to the next request on the same connection.
+ *
+ * The callback receives the transaction handle so its queries run on the
+ * same connection where the LOCAL settings apply. With pglite (single
+ * connection per database) the outer `db` happens to share the same
+ * client, but real pool-backed drivers would not — passing `tx` is the
+ * correct production shape.
+ */
+export async function runAsTenant<T>(
+  db: TestDb,
+  tenantId: string,
+  fn: (tx: Parameters<Parameters<TestDb["transaction"]>[0]>[0]) => Promise<T>,
+): Promise<T> {
+  return await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select set_config(${TENANT_CONTEXT_GUC}, ${tenantId}, true)`,
+    );
+    await tx.execute(sql.raw(`set local role ${TENANT_APP_ROLE}`));
+    return await fn(tx);
+  });
 }
