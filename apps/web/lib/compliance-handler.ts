@@ -18,7 +18,7 @@ import {
   type ProgramDue,
 } from "@ga/compliance";
 import { schema } from "@ga/db";
-import type { AircraftDb } from "@ga/aircraft";
+import { SquawkService, type AircraftDb } from "@ga/aircraft";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -112,11 +112,23 @@ export async function handleComplianceDueList(
       ),
     );
 
+  // E1.3 — open grounding squawks make the aircraft not airworthy.
+  // Read these alongside subscriptions so the response always carries
+  // the same disclosure shape regardless of whether subscriptions exist.
+  const squawkSvc = new SquawkService(db);
+  const openGroundingSquawks = await squawkSvc.listOpenGroundingForAircraft(
+    ctx.tenantId,
+    aircraftId,
+  );
+
   if (subs.length === 0) {
+    const status =
+      openGroundingSquawks.length > 0 ? "overdue" : "ok";
     return NextResponse.json({
       aircraft_id: aircraftId,
       airframe_total_time: airframeTime,
-      airworthiness_status: "ok",
+      airworthiness_status: status,
+      open_grounding_squawks: openGroundingSquawks.map(serializeSquawkRef),
       disclaimer: DISCLAIMER,
       programs: [],
     });
@@ -171,13 +183,29 @@ export async function handleComplianceDueList(
     programResults.push(serializeProgramDue(tpl.id, tpl.code, tpl.name, result));
   }
 
-  const airworthinessStatus = rollupAirworthiness(allProgramDues);
+  const inspectionStatus = rollupAirworthiness(allProgramDues);
+  // Open grounding squawks force overdue regardless of inspection rollup.
+  const airworthinessStatus =
+    openGroundingSquawks.length > 0 ? "overdue" : inspectionStatus;
 
   return NextResponse.json({
     aircraft_id: aircraftId,
     airframe_total_time: airframeTime,
     airworthiness_status: airworthinessStatus,
+    open_grounding_squawks: openGroundingSquawks.map(serializeSquawkRef),
     disclaimer: DISCLAIMER,
     programs: programResults,
   });
+}
+
+function serializeSquawkRef(sq: {
+  id: string;
+  description: string;
+  occurredAt: Date;
+}) {
+  return {
+    id: sq.id,
+    description: sq.description,
+    occurred_at: sq.occurredAt.toISOString(),
+  };
 }

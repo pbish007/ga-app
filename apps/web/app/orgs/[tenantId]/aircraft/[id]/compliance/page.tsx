@@ -6,8 +6,10 @@ import { and, eq } from "drizzle-orm";
 import {
   AircraftNotFoundError,
   AircraftService,
+  SquawkService,
   type AircraftDb,
 } from "@ga/aircraft";
+import type { Squawk } from "@ga/db";
 import {
   computeProgramDue,
   rollupAirworthiness,
@@ -118,17 +120,38 @@ export default async function ComplianceDashboardPage({
         });
       }
 
-      const airworthinessStatus = rollupAirworthiness(
-        programResults.map((p) => p.result),
+      const squawkSvc = new SquawkService(db);
+      const openGroundingSquawks = await squawkSvc.listOpenGroundingForAircraft(
+        ctx.tenantId,
+        aircraft.id,
       );
 
-      return { aircraft, airframeTime, programResults, airworthinessStatus };
+      const inspectionStatus = rollupAirworthiness(
+        programResults.map((p) => p.result),
+      );
+      // E1.3 — an open grounding squawk overrides the inspection rollup.
+      const airworthinessStatus: ComplianceStatus =
+        openGroundingSquawks.length > 0 ? "overdue" : inspectionStatus;
+
+      return {
+        aircraft,
+        airframeTime,
+        programResults,
+        airworthinessStatus,
+        openGroundingSquawks,
+      };
     },
   );
 
   if (!data) notFound();
 
-  const { aircraft, airframeTime, programResults, airworthinessStatus } = data;
+  const {
+    aircraft,
+    airframeTime,
+    programResults,
+    airworthinessStatus,
+    openGroundingSquawks,
+  } = data;
 
   return (
     <main style={s.main}>
@@ -144,6 +167,14 @@ export default async function ComplianceDashboardPage({
       </p>
 
       <AirworthinessIndicator status={airworthinessStatus} />
+
+      {openGroundingSquawks.length > 0 ? (
+        <GroundingSquawksPanel
+          tenantId={tenantId}
+          aircraftId={aircraft.id}
+          squawks={openGroundingSquawks}
+        />
+      ) : null}
 
       {programResults.length === 0 ? (
         <p style={{ marginTop: "1.5rem", color: "#666" }}>
@@ -207,6 +238,48 @@ function StatusBadge({ status }: { status: ComplianceStatus }) {
     >
       {STATUS_LABEL[status]}
     </span>
+  );
+}
+
+function GroundingSquawksPanel({
+  tenantId,
+  aircraftId,
+  squawks,
+}: {
+  tenantId: string;
+  aircraftId: string;
+  squawks: Squawk[];
+}) {
+  return (
+    <div
+      style={{
+        marginTop: "1rem",
+        padding: "0.85rem 1rem",
+        background: "#fef2f2",
+        border: "1px solid #dc2626",
+        borderRadius: 8,
+      }}
+    >
+      <p style={{ margin: 0, fontWeight: 700, color: "#7f1d1d" }}>
+        {squawks.length} open grounding{" "}
+        {squawks.length === 1 ? "squawk" : "squawks"} ground this aircraft
+      </p>
+      <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.2rem", color: "#7f1d1d" }}>
+        {squawks.slice(0, 3).map((sq) => (
+          <li key={sq.id} style={{ fontSize: "0.9rem" }}>
+            {sq.description}
+          </li>
+        ))}
+      </ul>
+      <p style={{ margin: "0.5rem 0 0", fontSize: "0.85rem" }}>
+        <Link
+          href={`/orgs/${tenantId}/aircraft/${aircraftId}/squawks`}
+          style={{ ...s.link, color: "#7f1d1d" }}
+        >
+          Review and resolve squawks →
+        </Link>
+      </p>
+    </div>
   );
 }
 

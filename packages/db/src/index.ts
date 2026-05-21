@@ -76,6 +76,18 @@ export type {
   FlightTimeEntry,
   NewFlightTimeEntry,
 } from "./schema/flight-time.js";
+export type {
+  NewSquawk,
+  NewSquawkPhoto,
+  Squawk,
+  SquawkPhoto,
+  SquawkSeverity,
+  SquawkStatus,
+} from "./schema/squawks.js";
+export {
+  SQUAWK_SEVERITIES,
+  SQUAWK_STATUSES,
+} from "./schema/squawks.js";
 export { setupTestDb, type TestDb } from "./test/pglite.js";
 export {
   TENANT_APP_ROLE,

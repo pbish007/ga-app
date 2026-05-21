@@ -78,6 +78,12 @@ export default async function AircraftDetailPage({
         >
           Compliance
         </Link>
+        <Link
+          href={`/orgs/${tenantId}/aircraft/${aircraft.id}/squawks`}
+          style={{ ...s.buttonLink, background: "#dc2626" }}
+        >
+          Squawks
+        </Link>
       </div>
 
       <h2 style={s.h2}>Profile</h2>

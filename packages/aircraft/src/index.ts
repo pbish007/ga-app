@@ -24,3 +24,14 @@ export {
   type InstallComponentInput,
   type RemoveComponentInput,
 } from "./component-service.js";
+export {
+  SquawkAircraftNotFoundError,
+  SquawkAlreadyResolvedError,
+  SquawkNotFoundError,
+  SquawkPhotoCrossTenantError,
+  SquawkService,
+  SquawkValidationError,
+  type FileSquawkInput,
+  type ResolveSquawkInput,
+  type SquawkWithPhotos,
+} from "./squawk-service.js";
