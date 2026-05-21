@@ -60,7 +60,13 @@ describe("regime spine (PMB-8 / Epic K)", () => {
     expect(ia?.name).toContain("Inspection Authorization");
 
     expect(bundle.rtsTemplates.map((r) => r.code).sort()).toEqual(
-      ["100_hour", "annual", "standard"],
+      [
+        "100_hour",
+        "ad_compliance",
+        "annual",
+        "return_to_service_maintenance",
+        "standard",
+      ],
     );
 
     const lifetime = bundle.retentionRules.filter(
