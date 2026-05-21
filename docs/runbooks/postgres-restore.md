@@ -10,6 +10,12 @@ either a point-in-time or a snapshot. It is the J1.1 deliverable on
 [PMB-19](/PMB/issues/PMB-19); the J1.2 drill ([PMB-22](/PMB/issues/PMB-22))
 exercises step 3 against a staging branch.
 
+> **A note on "staging" in Phase A.** Neon has no separate staging instance
+> in our setup — there is one project, `ga-app-prod`. The drill (and any
+> rehearsal restore) creates a fresh Neon **branch** off `main`, treats it
+> as staging for the duration of the exercise, then deletes it. The same
+> branch-from-PITR mechanism is what we use in an actual incident.
+
 ---
 
 ## 1. Backup posture
@@ -150,6 +156,68 @@ Verify TLS is on after the first migration completes:
 psql "$DATABASE_URL_DIRECT" -c "SHOW ssl;"            # expect: on
 psql "$DATABASE_URL_DIRECT" -c "SELECT count(*) FROM regimes;"  # expect: 1 (FAA)
 ```
+
+---
+
+## 3.7 Verification drill (J1.2)
+
+The drill exercises §3.3 end-to-end and writes one row into §5 (verification
+log). Run it quarterly on Phase A, monthly on Phase B. Both the engineer
+and an on-call operator should be able to execute it cold.
+
+**Inputs you need before starting**
+
+- Neon console access (so you can create a branch and read its connection
+  string), OR a Neon API key with `member` scope on the `ga-app-prod`
+  project.
+- A workstation with `psql` ≥ 14 and `python3` (for the JSON diff).
+
+**Procedure**
+
+1. **Snapshot the source.** In the Neon console → project `ga-app-prod` →
+   **Branches** → note the head LSN / timestamp on `main`. Start a wall-clock
+   stopwatch.
+2. **Create the drill branch.** Click **Create branch** → parent `main` →
+   **From point in time:** the timestamp from step 1 (or "Now" — both are
+   valid for a drill). Name the branch `drill-YYYYMMDD-HHMM`. Wait for the
+   status to flip to **Ready**.
+3. **Stop the stopwatch.** Record the elapsed seconds — this is the restore
+   duration the drill publishes.
+4. **Pull both connection strings.** From the Neon UI, copy the **direct**
+   (non-`-pooler.`) URLs of (a) the source/primary `main` branch and (b)
+   the new drill branch.
+5. **Run the comparator.** From a checkout of this repo on `main`:
+
+   ```sh
+   export SOURCE_DATABASE_URL='postgres://...@HOST.REGION.aws.neon.tech/DBNAME?sslmode=require'
+   export RESTORED_DATABASE_URL='postgres://...@DRILL_HOST.REGION.aws.neon.tech/DBNAME?sslmode=require'
+   export RESTORE_DURATION_SECONDS=<from step 3>
+   export OUT_DIR=./drill-out
+   packages/db/scripts/drill-compare.sh
+   ```
+
+   The script writes `./drill-out/report.json` and exits **0 on match**, **1
+   on mismatch**. It checks every table the migrations create — extra/missing
+   tables and row-count differences both fail the drill.
+
+6. **Attach the artifact.** Upload `drill-out/report.json` to [PMB-22](/PMB/issues/PMB-22).
+   Add a row to §5 below with the date, the tier, the operator, PASS/FAIL,
+   and the report's `total_duration_seconds` (= our published RTO estimate
+   for this drill).
+
+7. **Tidy up.** Delete the drill branch from the Neon UI. Drill branches
+   bill against the project's storage allowance.
+
+**What "PASS" means**
+
+- `ok: true` in the report (every sample table either exists in both with
+  identical row counts, or doesn't exist in either).
+- `total_duration_seconds` is at or below the documented RTO for the
+  current tier (Phase A ≤ 7200s, Phase B ≤ 1800s).
+
+If `ok` is false, do **not** mark the drill PASS. The mismatch is either a
+real fidelity bug in Neon (file an incident under [PMB-9](/PMB/issues/PMB-9)
+immediately) or a runbook gap — note it in §5 and patch this document.
 
 ---
 
