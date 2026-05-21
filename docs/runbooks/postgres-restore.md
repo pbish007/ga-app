@@ -130,6 +130,29 @@ expansion.
 
 ---
 
+## 3.6 Applying migrations to a fresh (or restored) Neon branch
+
+Run the idempotent migration helper. It uses `psql`, creates a
+`schema_migrations` tracking table on first run, and is safe to re-invoke:
+
+```sh
+export DATABASE_URL_DIRECT="postgres://USER:PASS@HOST.REGION.aws.neon.tech/DBNAME?sslmode=require"
+packages/db/scripts/migrate.sh
+```
+
+The script refuses to run against a URL without `sslmode=require` (or
+stricter) and against the pooled endpoint — use the direct (non-`-pooler.`)
+hostname.
+
+Verify TLS is on after the first migration completes:
+
+```sh
+psql "$DATABASE_URL_DIRECT" -c "SHOW ssl;"            # expect: on
+psql "$DATABASE_URL_DIRECT" -c "SELECT count(*) FROM regimes;"  # expect: 1 (FAA)
+```
+
+---
+
 ## 4. What we explicitly do NOT do
 
 - **No `pg_dump` to local disk on a schedule.** Neon's continuous backup is
