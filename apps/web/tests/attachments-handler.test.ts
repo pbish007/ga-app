@@ -4,6 +4,8 @@ import { setupTestDb, type TestDb, schema as dbSchema } from "@ga/db";
 import { DocumentsService, MemoryBlobDriver } from "@ga/storage";
 
 import {
+  handleAttachmentDownload,
+  handleAttachmentMintSignedUrl,
   handleAttachmentRetrieve,
   handleAttachmentUpload,
 } from "../lib/attachments-handler";
@@ -155,5 +157,128 @@ describe("attachments handlers (PMB-20)", () => {
     );
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/tenant_id/);
+  });
+});
+
+const SECRET = "handler-test-secret";
+
+describe("J2.2 signed-URL handlers (PMB-23)", () => {
+  let db: TestDb;
+  let service: DocumentsService;
+  let tenantA: string;
+  let tenantB: string;
+  let documentId: string;
+
+  beforeEach(async () => {
+    db = await setupTestDb();
+    const driver = new MemoryBlobDriver();
+    service = new DocumentsService(db, driver, "memory");
+    tenantA = await seedOrg(db, "Org A");
+    tenantB = await seedOrg(db, "Org B");
+
+    // Upload a fixture document for tenantA.
+    const form = new FormData();
+    form.set(
+      "file",
+      new File([new TextEncoder().encode("engine log entry")], "engine.txt", {
+        type: "text/plain",
+      }),
+    );
+    form.set("tenant_id", tenantA);
+    form.set("document_type", "maintenance_log");
+    const uploadRes = await handleAttachmentUpload(
+      new Request("https://example.test/api/attachments", {
+        method: "POST",
+        body: form,
+      }),
+      { service },
+    );
+    const created = (await uploadRes.json()) as { id: string };
+    documentId = created.id;
+  });
+
+  it("mints a signed URL and the download endpoint redeems it", async () => {
+    const mintRes = await handleAttachmentMintSignedUrl(
+      new Request(
+        `https://example.test/api/attachments/${documentId}/signed-url?tenant_id=${tenantA}`,
+      ),
+      { params: { id: documentId } },
+      { service, signingSecret: SECRET },
+    );
+    expect(mintRes.status).toBe(200);
+    const { signed_url, expires_at } = (await mintRes.json()) as {
+      signed_url: string;
+      expires_at: string;
+    };
+    expect(signed_url).toMatch(/^\/api\/attachments\/download\?token=/);
+    expect(new Date(expires_at).getTime()).toBeGreaterThan(Date.now());
+
+    const token = new URL(
+      "https://x" + signed_url,
+    ).searchParams.get("token")!;
+    const downloadRes = await handleAttachmentDownload(
+      new Request(`https://example.test/api/attachments/download?token=${token}`),
+      { service, signingSecret: SECRET },
+    );
+    expect(downloadRes.status).toBe(200);
+    expect(downloadRes.headers.get("Content-Type")).toBe("text/plain");
+    expect(
+      new TextDecoder().decode(new Uint8Array(await downloadRes.arrayBuffer())),
+    ).toBe("engine log entry");
+  });
+
+  it("rejects a download with an expired token (401)", async () => {
+    const mintRes = await handleAttachmentMintSignedUrl(
+      new Request(
+        `https://example.test/api/attachments/${documentId}/signed-url?tenant_id=${tenantA}&ttl_ms=1`,
+      ),
+      { params: { id: documentId } },
+      { service, signingSecret: SECRET },
+    );
+    const { signed_url } = (await mintRes.json()) as { signed_url: string };
+    const token = new URL("https://x" + signed_url).searchParams.get("token")!;
+
+    await new Promise((r) => setTimeout(r, 5));
+
+    const downloadRes = await handleAttachmentDownload(
+      new Request(`https://example.test/api/attachments/download?token=${token}`),
+      { service, signingSecret: SECRET },
+    );
+    expect(downloadRes.status).toBe(401);
+    expect((await downloadRes.json()).error).toMatch(/expired/);
+  });
+
+  it("rejects a tampered token (401)", async () => {
+    const downloadRes = await handleAttachmentDownload(
+      new Request(
+        `https://example.test/api/attachments/download?token=definitely-not-a-valid-token`,
+      ),
+      { service, signingSecret: SECRET },
+    );
+    expect(downloadRes.status).toBe(401);
+    expect((await downloadRes.json()).error).toMatch(/invalid/);
+  });
+
+  it("returns 404 when minting a URL for a cross-tenant document", async () => {
+    const mintRes = await handleAttachmentMintSignedUrl(
+      new Request(
+        `https://example.test/api/attachments/${documentId}/signed-url?tenant_id=${tenantB}`,
+      ),
+      { params: { id: documentId } },
+      { service, signingSecret: SECRET },
+    );
+    expect(mintRes.status).toBe(404);
+  });
+
+  it("rejects a ttl_ms that exceeds 1 hour", async () => {
+    const mintRes = await handleAttachmentMintSignedUrl(
+      new Request(
+        `https://example.test/api/attachments/${documentId}/signed-url?tenant_id=${tenantA}&ttl_ms=3700000`,
+      ),
+      { params: { id: documentId } },
+      { service, signingSecret: SECRET },
+    );
+    expect(mintRes.status).toBe(400);
+    expect((await mintRes.json()).error).toMatch(/ttl_ms/);
   });
 });

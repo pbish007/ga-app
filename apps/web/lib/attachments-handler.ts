@@ -4,6 +4,11 @@ import {
   CrossTenantDocumentAccessError,
   DocumentNotFoundError,
   InvalidObjectKeyInputError,
+  SignedUrlExpiredError,
+  SignedUrlInvalidError,
+  SIGNED_URL_DEFAULT_TTL_MS,
+  createSignedDownloadToken,
+  verifySignedDownloadToken,
   type DocumentsService,
 } from "@ga/storage";
 
@@ -14,6 +19,7 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 export interface AttachmentsHandlerDeps {
   service: DocumentsService;
+  signingSecret?: string;
 }
 
 function serializeDocument(d: {
@@ -232,6 +238,192 @@ export async function handleAttachmentRetrieve(
         `cross-tenant attachment fetch blocked document=${err.documentId} tenant=${err.attemptedTenantId}`,
       );
       return NextResponse.json({ error: "document not found" }, { status: 404 });
+    }
+    throw err;
+  }
+}
+
+/**
+ * GET /api/attachments/{id}/signed-url?tenant_id={uuid}&ttl_ms={ms}
+ *
+ * Mints a short-lived signed download token for a document the caller
+ * already has access to. The token encodes `{ documentId, tenantId,
+ * expiresAt }` signed with HMAC-SHA256 keyed on BLOB_READ_WRITE_TOKEN.
+ *
+ * Returns `{ signed_url, expires_at }` where `signed_url` is the
+ * `GET /api/attachments/download?token=...` path the client redeems.
+ *
+ * TTL defaults to 5 minutes; pass `ttl_ms` to override (cap: 1 hour).
+ * Logs the mint event with tenant_id, attachment_id, and TTL.
+ *
+ * AC (J2.2):
+ *   - Token is invalid after TTL (enforced by `handleAttachmentDownload`).
+ *   - Tampered tokens are rejected by signature check.
+ *   - Mint is logged with tenant_id, attachment_id, and TTL.
+ */
+export async function handleAttachmentMintSignedUrl(
+  request: Request,
+  context: { params: { id: string } },
+  deps: AttachmentsHandlerDeps,
+): Promise<Response> {
+  const documentId = context.params.id?.toLowerCase() ?? "";
+  if (!UUID_RE.test(documentId)) {
+    return NextResponse.json(
+      { error: "path parameter `id` must be a canonical UUID" },
+      { status: 400 },
+    );
+  }
+
+  const url = new URL(request.url);
+  const tenantId = (url.searchParams.get("tenant_id") ?? "")
+    .trim()
+    .toLowerCase();
+  if (!UUID_RE.test(tenantId)) {
+    return NextResponse.json(
+      { error: "query parameter `tenant_id` is required and must be a UUID" },
+      { status: 400 },
+    );
+  }
+
+  const ttlRaw = url.searchParams.get("ttl_ms");
+  let ttlMs = SIGNED_URL_DEFAULT_TTL_MS;
+  if (ttlRaw !== null && ttlRaw.trim() !== "") {
+    const n = Number(ttlRaw);
+    if (!Number.isInteger(n) || n <= 0 || n > 60 * 60 * 1000) {
+      return NextResponse.json(
+        {
+          error:
+            "query parameter `ttl_ms` must be a positive integer ≤ 3600000",
+        },
+        { status: 400 },
+      );
+    }
+    ttlMs = n;
+  }
+
+  const secret = deps.signingSecret ?? process.env.BLOB_READ_WRITE_TOKEN ?? "";
+  if (!secret) {
+    return NextResponse.json(
+      { error: "server misconfiguration: signing secret is not set" },
+      { status: 500 },
+    );
+  }
+
+  try {
+    // Auth check: verify the document exists and belongs to this tenant.
+    // Does not fetch blob bytes.
+    await deps.service.getDocumentMeta({ documentId, tenantId });
+  } catch (err) {
+    if (err instanceof DocumentNotFoundError) {
+      return NextResponse.json(
+        { error: "document not found" },
+        { status: 404 },
+      );
+    }
+    if (err instanceof CrossTenantDocumentAccessError) {
+      console.warn(
+        `cross-tenant signed-url mint blocked document=${err.documentId} tenant=${err.attemptedTenantId}`,
+      );
+      return NextResponse.json(
+        { error: "document not found" },
+        { status: 404 },
+      );
+    }
+    throw err;
+  }
+
+  const { token, expiresAt } = createSignedDownloadToken(
+    secret,
+    { documentId, tenantId },
+    { ttlMs },
+  );
+
+  console.info(
+    `signed-url minted attachment_id=${documentId} tenant_id=${tenantId} ttl_ms=${ttlMs} expires_at=${expiresAt.toISOString()}`,
+  );
+
+  const downloadUrl = `/api/attachments/download?token=${encodeURIComponent(token)}`;
+  return NextResponse.json(
+    { signed_url: downloadUrl, expires_at: expiresAt.toISOString() },
+    { status: 200 },
+  );
+}
+
+/**
+ * GET /api/attachments/download?token={signedToken}
+ *
+ * Redeems a signed download token minted by `handleAttachmentMintSignedUrl`.
+ * Validates the HMAC signature and expiry, then proxies the blob bytes
+ * (same response shape as the direct retrieval endpoint).
+ *
+ * Returns 401 for expired or invalid tokens so clients can distinguish
+ * "token problem" from "document gone" (404).
+ */
+export async function handleAttachmentDownload(
+  request: Request,
+  deps: AttachmentsHandlerDeps,
+): Promise<Response> {
+  const url = new URL(request.url);
+  const token = url.searchParams.get("token") ?? "";
+  if (!token) {
+    return NextResponse.json(
+      { error: "query parameter `token` is required" },
+      { status: 400 },
+    );
+  }
+
+  const secret = deps.signingSecret ?? process.env.BLOB_READ_WRITE_TOKEN ?? "";
+  if (!secret) {
+    return NextResponse.json(
+      { error: "server misconfiguration: signing secret is not set" },
+      { status: 500 },
+    );
+  }
+
+  let payload: { documentId: string; tenantId: string };
+  try {
+    payload = verifySignedDownloadToken(secret, token);
+  } catch (err) {
+    if (err instanceof SignedUrlExpiredError) {
+      return NextResponse.json(
+        { error: "signed download URL has expired" },
+        { status: 401 },
+      );
+    }
+    if (err instanceof SignedUrlInvalidError) {
+      return NextResponse.json(
+        { error: "signed download URL is invalid" },
+        { status: 401 },
+      );
+    }
+    throw err;
+  }
+
+  try {
+    const { document, body } = await deps.service.retrieve({
+      documentId: payload.documentId,
+      tenantId: payload.tenantId,
+    });
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "Content-Type": document.contentType,
+        "Content-Length": String(document.byteSize),
+        "Content-Disposition": `attachment; filename*=UTF-8''${encodeRFC5987(
+          document.originalFilename,
+        )}`,
+        "X-Document-Sha256": document.sha256Hex,
+      },
+    });
+  } catch (err) {
+    if (
+      err instanceof DocumentNotFoundError ||
+      err instanceof CrossTenantDocumentAccessError
+    ) {
+      return NextResponse.json(
+        { error: "document not found" },
+        { status: 404 },
+      );
     }
     throw err;
   }

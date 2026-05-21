@@ -154,4 +154,45 @@ export class DocumentsService {
     });
     return { document: row, body };
   }
+
+  /**
+   * Retrieve document metadata without fetching the blob bytes.
+   *
+   * Used by the signed-URL mint endpoint (J2.2): the caller verifies the
+   * document exists for this tenant before minting the token, without
+   * paying the cost of a full blob round-trip.
+   *
+   * @throws {DocumentNotFoundError}
+   * @throws {CrossTenantDocumentAccessError}
+   */
+  async getDocumentMeta(input: {
+    documentId: string;
+    tenantId: string;
+  }): Promise<Document> {
+    const rows = await this.db
+      .select()
+      .from(documents)
+      .where(
+        and(
+          eq(documents.id, input.documentId),
+          eq(documents.tenantId, input.tenantId),
+          isNull(documents.deletedAt),
+        ),
+      );
+    const row = rows[0];
+    if (!row) {
+      const anyRows = await this.db
+        .select({ id: documents.id, tenantId: documents.tenantId })
+        .from(documents)
+        .where(eq(documents.id, input.documentId));
+      if (anyRows[0] && anyRows[0].tenantId !== input.tenantId) {
+        throw new CrossTenantDocumentAccessError(
+          input.documentId,
+          input.tenantId,
+        );
+      }
+      throw new DocumentNotFoundError(input.documentId);
+    }
+    return row;
+  }
 }

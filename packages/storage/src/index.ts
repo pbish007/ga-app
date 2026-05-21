@@ -22,3 +22,12 @@ export {
   type UploadDocumentInput,
   type UploadDocumentResult,
 } from "./documents.js";
+export {
+  SIGNED_URL_DEFAULT_TTL_MS,
+  SignedUrlExpiredError,
+  SignedUrlInvalidError,
+  createSignedDownloadToken,
+  verifySignedDownloadToken,
+  type SignedDownloadPayload,
+  type SignedDownloadToken,
+} from "./signed-url.js";
