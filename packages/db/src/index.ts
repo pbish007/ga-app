@@ -25,6 +25,8 @@ export {
   EMAIL_OUTBOX_STATUSES,
   ORG_TYPES,
 } from "./schema/accounts.js";
+export type { Document, NewDocument, StorageProvider } from "./schema/documents.js";
+export { STORAGE_PROVIDERS } from "./schema/documents.js";
 export type {
   NewRegime,
   NewRegimeCredentialType,
