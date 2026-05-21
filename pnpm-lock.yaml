@@ -13,6 +13,9 @@ importers:
       '@ga/accounts':
         specifier: workspace:*
         version: link:../../packages/accounts
+      '@ga/aircraft':
+        specifier: workspace:*
+        version: link:../../packages/aircraft
       '@ga/db':
         specifier: workspace:*
         version: link:../../packages/db

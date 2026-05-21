@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@ga/accounts": "workspace:*",
+    "@ga/aircraft": "workspace:*",
     "@ga/db": "workspace:*",
     "@ga/storage": "workspace:*",
     "drizzle-orm": "0.36.4",
