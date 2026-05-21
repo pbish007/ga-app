@@ -88,6 +88,12 @@ export {
   SQUAWK_SEVERITIES,
   SQUAWK_STATUSES,
 } from "./schema/squawks.js";
+export type {
+  MaintenanceEntry,
+  MaintenanceEntryType,
+  NewMaintenanceEntry,
+} from "./schema/maintenance-entries.js";
+export { MAINTENANCE_ENTRY_TYPES } from "./schema/maintenance-entries.js";
 export { setupTestDb, type TestDb } from "./test/pglite.js";
 export {
   TENANT_APP_ROLE,
