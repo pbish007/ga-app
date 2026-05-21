@@ -23,6 +23,20 @@ export const regimes = pgTable("regimes", {
     .defaultNow(),
 });
 
+/**
+ * Inspection programs are regime-owned catalog rows. The `cadenceKind`
+ * column is a UI-facing categorical only — the engine determines actual
+ * cadence by counting child rows in {@link regimeInspectionProgramIntervals}:
+ *
+ *   * `single` → exactly one interval row (e.g. annual, 100-hour).
+ *   * `whichever_comes_first` → 2+ interval rows; engine takes the
+ *     earliest computed due-at across them.
+ *   * `custom` → zero interval rows; the operator supplies intervals
+ *     per aircraft (e.g. FAA progressive inspection programs).
+ *
+ * Updates to this column must keep the categorical and the actual
+ * child-row count consistent.
+ */
 export const regimeInspectionProgramTemplates = pgTable(
   "regime_inspection_program_templates",
   {
@@ -33,8 +47,6 @@ export const regimeInspectionProgramTemplates = pgTable(
     code: text("code").notNull(),
     name: text("name").notNull(),
     cadenceKind: text("cadence_kind").notNull(),
-    intervalValue: numeric("interval_value"),
-    intervalUnit: text("interval_unit"),
     description: text("description"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -43,6 +55,43 @@ export const regimeInspectionProgramTemplates = pgTable(
   (t) => ({
     regimeCodeUnique: uniqueIndex("regime_inspection_program_templates_code")
       .on(t.regimeId, t.code),
+  }),
+);
+
+/**
+ * One row per interval on an inspection program. A program with
+ * multiple rows represents "whichever comes first" — the engine
+ * computes a due-at for each interval and surfaces the earliest.
+ *
+ * `kind` is the unit-of-measure family:
+ *   * `hour`     — value/unit anchored to airframe total time
+ *                  (e.g. 100/hours).
+ *   * `calendar` — value/unit anchored to a date
+ *                  (e.g. 12/months, 24/months).
+ *   * `cycle`    — value/unit anchored to airframe cycles
+ *                  (e.g. 5000/cycles). Reserved for V2 cycle tracking;
+ *                  no FAA MVP program uses it yet.
+ */
+export const regimeInspectionProgramIntervals = pgTable(
+  "regime_inspection_program_intervals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    templateId: uuid("template_id")
+      .notNull()
+      .references(() => regimeInspectionProgramTemplates.id, {
+        onDelete: "cascade",
+      }),
+    kind: text("kind").notNull(),
+    value: numeric("value").notNull(),
+    unit: text("unit").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    templateKindUnitUnique: uniqueIndex(
+      "regime_inspection_program_intervals_template_kind_unit",
+    ).on(t.templateId, t.kind, t.unit),
   }),
 );
 
@@ -136,6 +185,27 @@ export type RegimeInspectionProgramTemplate =
   typeof regimeInspectionProgramTemplates.$inferSelect;
 export type NewRegimeInspectionProgramTemplate =
   typeof regimeInspectionProgramTemplates.$inferInsert;
+
+export type RegimeInspectionProgramInterval =
+  typeof regimeInspectionProgramIntervals.$inferSelect;
+export type NewRegimeInspectionProgramInterval =
+  typeof regimeInspectionProgramIntervals.$inferInsert;
+
+export const INSPECTION_INTERVAL_KINDS = [
+  "hour",
+  "calendar",
+  "cycle",
+] as const;
+export type InspectionIntervalKind =
+  (typeof INSPECTION_INTERVAL_KINDS)[number];
+
+export const INSPECTION_CADENCE_KINDS = [
+  "single",
+  "whichever_comes_first",
+  "custom",
+] as const;
+export type InspectionCadenceKind =
+  (typeof INSPECTION_CADENCE_KINDS)[number];
 
 export type RegimeDirectiveSource = typeof regimeDirectiveSources.$inferSelect;
 export type NewRegimeDirectiveSource =

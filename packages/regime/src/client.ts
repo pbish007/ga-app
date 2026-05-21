@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
@@ -7,6 +7,7 @@ import { schema as dbSchema } from "@ga/db";
 const {
   regimes,
   regimeInspectionProgramTemplates,
+  regimeInspectionProgramIntervals,
   regimeDirectiveSources,
   regimeCredentialTypes,
   regimeRtsTemplates,
@@ -29,26 +30,44 @@ export type RegimeDb =
 export type Regime = typeof regimes.$inferSelect;
 export type RegimeInspectionProgramTemplate =
   typeof regimeInspectionProgramTemplates.$inferSelect;
+export type RegimeInspectionProgramInterval =
+  typeof regimeInspectionProgramIntervals.$inferSelect;
 export type RegimeDirectiveSource = typeof regimeDirectiveSources.$inferSelect;
 export type RegimeCredentialType = typeof regimeCredentialTypes.$inferSelect;
 export type RegimeRtsTemplate = typeof regimeRtsTemplates.$inferSelect;
 export type RegimeRetentionRule = typeof regimeRetentionRules.$inferSelect;
 
+/**
+ * A regime inspection program with its 0..N child intervals grouped
+ * together. This is the shape the compliance engine consumes — it
+ * never sees the raw flat tables, so a future schema split (e.g. moving
+ * intervals into a separate package) is invisible to consumers.
+ */
+export interface RegimeInspectionProgram {
+  template: RegimeInspectionProgramTemplate;
+  intervals: RegimeInspectionProgramInterval[];
+}
+
 export interface RegimeBundle {
   regime: Regime;
-  inspectionProgramTemplates: RegimeInspectionProgramTemplate[];
+  inspectionPrograms: RegimeInspectionProgram[];
   directiveSources: RegimeDirectiveSource[];
   credentialTypes: RegimeCredentialType[];
   rtsTemplates: RegimeRtsTemplate[];
   retentionRules: RegimeRetentionRule[];
 }
 
+export interface NewRegimeIntervalInput {
+  kind: "hour" | "calendar" | "cycle";
+  value: string | number;
+  unit: string;
+}
+
 export interface NewRegimeTemplateInput {
   code: string;
   name: string;
-  cadenceKind: string;
-  intervalValue?: string | number | null;
-  intervalUnit?: string | null;
+  cadenceKind: "single" | "whichever_comes_first" | "custom";
+  intervals?: NewRegimeIntervalInput[];
   description?: string | null;
 }
 
@@ -151,6 +170,58 @@ export class RegimeClient {
       .where(eq(regimeInspectionProgramTemplates.regimeId, regimeId));
   }
 
+  /**
+   * List every inspection program for a regime grouped with its
+   * intervals. This is the shape the compliance engine consumes; the
+   * intervals[] is empty for `custom` programs (e.g. progressive).
+   */
+  async listInspectionPrograms(
+    regimeId: string,
+  ): Promise<RegimeInspectionProgram[]> {
+    const templates = await this.listInspectionProgramTemplates(regimeId);
+    if (templates.length === 0) return [];
+    const intervals = await this.db
+      .select()
+      .from(regimeInspectionProgramIntervals)
+      .where(
+        inArray(
+          regimeInspectionProgramIntervals.templateId,
+          templates.map((t) => t.id),
+        ),
+      );
+    const byTemplate = new Map<string, RegimeInspectionProgramInterval[]>();
+    for (const interval of intervals) {
+      const arr = byTemplate.get(interval.templateId) ?? [];
+      arr.push(interval);
+      byTemplate.set(interval.templateId, arr);
+    }
+    return templates.map((template) => ({
+      template,
+      intervals: byTemplate.get(template.id) ?? [],
+    }));
+  }
+
+  /**
+   * Fetch a single inspection program (template + intervals) by id.
+   * Used by the compliance engine when the caller already has a
+   * specific program id (e.g. from a subscription row).
+   */
+  async getInspectionProgram(
+    templateId: string,
+  ): Promise<RegimeInspectionProgram | null> {
+    const templates = await this.db
+      .select()
+      .from(regimeInspectionProgramTemplates)
+      .where(eq(regimeInspectionProgramTemplates.id, templateId));
+    const template = templates[0];
+    if (!template) return null;
+    const intervals = await this.db
+      .select()
+      .from(regimeInspectionProgramIntervals)
+      .where(eq(regimeInspectionProgramIntervals.templateId, templateId));
+    return { template, intervals };
+  }
+
   async listDirectiveSources(regimeId: string): Promise<RegimeDirectiveSource[]> {
     return this.db
       .select()
@@ -182,13 +253,13 @@ export class RegimeClient {
   async loadBundle(regimeId: string): Promise<RegimeBundle> {
     const regime = await this.getById(regimeId);
     const [
-      inspectionProgramTemplates,
+      inspectionPrograms,
       directiveSources,
       credentialTypes,
       rtsTemplates,
       retentionRules,
     ] = await Promise.all([
-      this.listInspectionProgramTemplates(regimeId),
+      this.listInspectionPrograms(regimeId),
       this.listDirectiveSources(regimeId),
       this.listCredentialTypes(regimeId),
       this.listRtsTemplates(regimeId),
@@ -196,7 +267,7 @@ export class RegimeClient {
     ]);
     return {
       regime,
-      inspectionProgramTemplates,
+      inspectionPrograms,
       directiveSources,
       credentialTypes,
       rtsTemplates,
@@ -230,7 +301,7 @@ export class RegimeClient {
     const rts = input.rtsTemplates ?? [];
     const retention = input.retentionRules ?? [];
 
-    const inspectionProgramTemplates = templates.length
+    const insertedTemplates = templates.length
       ? await this.db
           .insert(regimeInspectionProgramTemplates)
           .values(
@@ -239,18 +310,44 @@ export class RegimeClient {
               code: t.code,
               name: t.name,
               cadenceKind: t.cadenceKind,
-              intervalValue:
-                t.intervalValue == null
-                  ? null
-                  : typeof t.intervalValue === "number"
-                    ? String(t.intervalValue)
-                    : t.intervalValue,
-              intervalUnit: t.intervalUnit ?? null,
               description: t.description ?? null,
             })),
           )
           .returning()
       : [];
+
+    // Insert intervals — flat list keyed back to their template by code.
+    const intervalRows = templates.flatMap((t, i) => {
+      const tpl = insertedTemplates[i];
+      if (!tpl) return [];
+      return (t.intervals ?? []).map((iv) => ({
+        templateId: tpl.id,
+        kind: iv.kind,
+        value: typeof iv.value === "number" ? String(iv.value) : iv.value,
+        unit: iv.unit,
+      }));
+    });
+    const insertedIntervals = intervalRows.length
+      ? await this.db
+          .insert(regimeInspectionProgramIntervals)
+          .values(intervalRows)
+          .returning()
+      : [];
+    const intervalsByTemplate = new Map<
+      string,
+      RegimeInspectionProgramInterval[]
+    >();
+    for (const iv of insertedIntervals) {
+      const arr = intervalsByTemplate.get(iv.templateId) ?? [];
+      arr.push(iv);
+      intervalsByTemplate.set(iv.templateId, arr);
+    }
+    const inspectionPrograms: RegimeInspectionProgram[] = insertedTemplates.map(
+      (template) => ({
+        template,
+        intervals: intervalsByTemplate.get(template.id) ?? [],
+      }),
+    );
 
     const directiveSources = sources.length
       ? await this.db
@@ -313,7 +410,7 @@ export class RegimeClient {
 
     return {
       regime,
-      inspectionProgramTemplates,
+      inspectionPrograms,
       directiveSources,
       credentialTypes,
       rtsTemplates,

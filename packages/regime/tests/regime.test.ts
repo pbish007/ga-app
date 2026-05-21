@@ -17,7 +17,7 @@ describe("regime spine (PMB-8 / Epic K)", () => {
 
     const bundle = await regimes.loadBundle(faa.id);
     expect(
-      bundle.inspectionProgramTemplates.map((t) => t.code).sort(),
+      bundle.inspectionPrograms.map((p) => p.template.code).sort(),
     ).toEqual(
       [
         "100_hour",
@@ -30,12 +30,26 @@ describe("regime spine (PMB-8 / Epic K)", () => {
       ].sort(),
     );
 
-    const annual = bundle.inspectionProgramTemplates.find(
-      (t) => t.code === "annual",
+    const annual = bundle.inspectionPrograms.find(
+      (p) => p.template.code === "annual",
     );
-    expect(annual?.cadenceKind).toBe("calendar");
-    expect(annual?.intervalUnit).toBe("months");
-    expect(Number(annual?.intervalValue)).toBe(12);
+    expect(annual?.template.cadenceKind).toBe("single");
+    expect(annual?.intervals).toHaveLength(1);
+    expect(annual?.intervals[0]?.kind).toBe("calendar");
+    expect(annual?.intervals[0]?.unit).toBe("months");
+    expect(Number(annual?.intervals[0]?.value)).toBe(12);
+
+    const hundredHour = bundle.inspectionPrograms.find(
+      (p) => p.template.code === "100_hour",
+    );
+    expect(hundredHour?.intervals[0]?.kind).toBe("hour");
+    expect(Number(hundredHour?.intervals[0]?.value)).toBe(100);
+
+    const progressive = bundle.inspectionPrograms.find(
+      (p) => p.template.code === "progressive",
+    );
+    expect(progressive?.template.cadenceKind).toBe("custom");
+    expect(progressive?.intervals).toHaveLength(0);
 
     expect(bundle.directiveSources.map((s) => s.code).sort()).toEqual(
       ["ad", "sb"],
@@ -74,18 +88,16 @@ describe("regime spine (PMB-8 / Epic K)", () => {
         {
           code: "annual",
           name: "Annual Airworthiness Inspection",
-          cadenceKind: "calendar",
-          intervalValue: 12,
-          intervalUnit: "months",
+          cadenceKind: "single",
+          intervals: [{ kind: "calendar", value: 12, unit: "months" }],
           description:
             "CAR 605.86: aircraft annual airworthiness inspection.",
         },
         {
           code: "elt",
           name: "ELT Inspection",
-          cadenceKind: "calendar",
-          intervalValue: 12,
-          intervalUnit: "months",
+          cadenceKind: "single",
+          intervals: [{ kind: "calendar", value: 12, unit: "months" }],
           description: "CAR 571.10 annual ELT inspection.",
         },
       ],
@@ -137,20 +149,54 @@ describe("regime spine (PMB-8 / Epic K)", () => {
 
     // CARS-specific templates round-trip correctly via the typed accessor.
     const carsBundle = await regimes.loadBundle(cars.regime.id);
-    expect(carsBundle.inspectionProgramTemplates.map((t) => t.code).sort())
-      .toEqual(["annual", "elt"]);
+    expect(
+      carsBundle.inspectionPrograms.map((p) => p.template.code).sort(),
+    ).toEqual(["annual", "elt"]);
     expect(carsBundle.credentialTypes.every((c) => c.authorizesSignoff))
       .toBe(true);
     expect(carsBundle.retentionRules[0]?.retentionPeriodValue).toBe(8);
     expect(carsBundle.rtsTemplates[0]?.body).toContain(
       "applicable airworthiness requirements",
     );
+    // Intervals round-trip too.
+    const carsAnnual = carsBundle.inspectionPrograms.find(
+      (p) => p.template.code === "annual",
+    );
+    expect(carsAnnual?.intervals[0]?.kind).toBe("calendar");
+    expect(Number(carsAnnual?.intervals[0]?.value)).toBe(12);
 
     // And the seeded FAA regime is untouched by the CARS insert.
     const faa = await regimes.getByCode("FAA");
     expect(faa.name).toBe("Federal Aviation Administration");
     const faaBundle = await regimes.loadBundle(faa.id);
-    expect(faaBundle.inspectionProgramTemplates.length).toBeGreaterThan(0);
+    expect(faaBundle.inspectionPrograms.length).toBeGreaterThan(0);
+  });
+
+  it("supports whichever-comes-first via multiple interval rows", async () => {
+    const db = await setupTestDb();
+    const regimes = new RegimeClient(db);
+
+    const cars = await regimes.createBundle({
+      code: "TEST-WCF",
+      name: "Test Regime",
+      jurisdiction: "Test",
+      inspectionProgramTemplates: [
+        {
+          code: "engine_overhaul",
+          name: "Engine TBO / Calendar (whichever comes first)",
+          cadenceKind: "whichever_comes_first",
+          intervals: [
+            { kind: "hour", value: 2000, unit: "hours" },
+            { kind: "calendar", value: 12, unit: "years" },
+          ],
+        },
+      ],
+    });
+    const program = cars.inspectionPrograms[0];
+    expect(program?.template.cadenceKind).toBe("whichever_comes_first");
+    expect(program?.intervals).toHaveLength(2);
+    const kinds = program?.intervals.map((i) => i.kind).sort();
+    expect(kinds).toEqual(["calendar", "hour"]);
   });
 
   it("regime lookup by missing code raises a typed error", async () => {

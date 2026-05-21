@@ -1,4 +1,5 @@
 import {
+  boolean,
   check,
   index,
   integer,
@@ -12,7 +13,7 @@ import {
 import { sql } from "drizzle-orm";
 
 import { organizations } from "./accounts.js";
-import { regimes } from "./regime.js";
+import { regimes, regimeInspectionProgramTemplates } from "./regime.js";
 
 /**
  * The two airframe time sources the FAA recognises for hour-based
@@ -86,3 +87,82 @@ export const aircraft = pgTable(
 
 export type Aircraft = typeof aircraft.$inferSelect;
 export type NewAircraft = typeof aircraft.$inferInsert;
+
+/**
+ * Subscribes an aircraft to a regime-owned inspection program. The row
+ * holds the state the compliance engine needs to compute a due-at:
+ * the last-complied anchors (date, airframe time, cycles) and the
+ * per-subscription due-soon thresholds.
+ *
+ * `(aircraft_id, program_id)` is unique — an aircraft is subscribed
+ * to a given program at most once. Tenants are isolated by RLS on
+ * `tenant_id`.
+ */
+export const aircraftInspectionSubscriptions = pgTable(
+  "aircraft_inspection_subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    aircraftId: uuid("aircraft_id")
+      .notNull()
+      .references(() => aircraft.id, { onDelete: "cascade" }),
+    programId: uuid("program_id")
+      .notNull()
+      .references(() => regimeInspectionProgramTemplates.id, {
+        onDelete: "restrict",
+      }),
+    lastCompliedAt: timestamp("last_complied_at", { withTimezone: true }),
+    lastCompliedAirframeTime: numeric("last_complied_airframe_time", {
+      precision: 10,
+      scale: 2,
+    }),
+    lastCompliedCycles: integer("last_complied_cycles"),
+    dueSoonDaysThreshold: integer("due_soon_days_threshold")
+      .notNull()
+      .default(30),
+    dueSoonHoursThreshold: numeric("due_soon_hours_threshold", {
+      precision: 10,
+      scale: 2,
+    })
+      .notNull()
+      .default("10"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    aircraftProgramUnique: uniqueIndex("ais_aircraft_program_unique").on(
+      t.aircraftId,
+      t.programId,
+    ),
+    tenantIdx: index("ais_tenant_idx").on(t.tenantId),
+    aircraftIdx: index("ais_aircraft_idx").on(t.aircraftId),
+    compliedAirframeNonneg: check(
+      "ais_complied_airframe_nonneg",
+      sql`${t.lastCompliedAirframeTime} is null or ${t.lastCompliedAirframeTime} >= 0`,
+    ),
+    compliedCyclesNonneg: check(
+      "ais_complied_cycles_nonneg",
+      sql`${t.lastCompliedCycles} is null or ${t.lastCompliedCycles} >= 0`,
+    ),
+    dueSoonDaysPositive: check(
+      "ais_due_soon_days_positive",
+      sql`${t.dueSoonDaysThreshold} > 0`,
+    ),
+    dueSoonHoursPositive: check(
+      "ais_due_soon_hours_positive",
+      sql`${t.dueSoonHoursThreshold} > 0`,
+    ),
+  }),
+);
+
+export type AircraftInspectionSubscription =
+  typeof aircraftInspectionSubscriptions.$inferSelect;
+export type NewAircraftInspectionSubscription =
+  typeof aircraftInspectionSubscriptions.$inferInsert;
