@@ -48,6 +48,10 @@ export type {
   RegimeRetentionRule,
   RegimeRtsTemplate,
 } from "./schema/regime.js";
+export type {
+  NewUserCredential,
+  UserCredential,
+} from "./schema/credentials.js";
 export { setupTestDb, type TestDb } from "./test/pglite.js";
 export {
   TENANT_APP_ROLE,

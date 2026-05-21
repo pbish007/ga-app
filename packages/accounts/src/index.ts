@@ -34,3 +34,8 @@ export {
   type Permission,
   type Role,
 } from "./permissions.js";
+export {
+  CredentialService,
+  type AddCredentialInput,
+  type CanSignOffOptions,
+} from "./credentials.js";
