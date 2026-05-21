@@ -7,6 +7,12 @@ export {
   type UpdateAirframeTotalTimeInput,
 } from "./aircraft-service.js";
 export {
+  FlightTimeMonotonicError,
+  FlightTimeService,
+  FlightTimeValidationError,
+  type LogFlightTimeInput,
+} from "./flight-time-service.js";
+export {
   AircraftNotFoundError as ComponentAircraftNotFoundError,
   ComponentAlreadyInstalledError,
   ComponentNotFoundError,

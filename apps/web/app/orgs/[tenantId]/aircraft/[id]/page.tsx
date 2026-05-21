@@ -65,6 +65,15 @@ export default async function AircraftDetailPage({
         {aircraft.yearManufactured ? ` · ${aircraft.yearManufactured}` : ""}
       </p>
 
+      <div style={{ marginTop: "1rem" }}>
+        <Link
+          href={`/orgs/${tenantId}/aircraft/${aircraft.id}/log-time`}
+          style={s.buttonLink}
+        >
+          Log flight time
+        </Link>
+      </div>
+
       <h2 style={s.h2}>Profile</h2>
       <div style={s.tableWrap}>
         <table style={s.table}>

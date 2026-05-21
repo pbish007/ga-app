@@ -66,6 +66,10 @@ export type {
   NewComponentInstallation,
 } from "./schema/components.js";
 export { COMPONENT_KINDS } from "./schema/components.js";
+export type {
+  FlightTimeEntry,
+  NewFlightTimeEntry,
+} from "./schema/flight-time.js";
 export { setupTestDb, type TestDb } from "./test/pglite.js";
 export {
   TENANT_APP_ROLE,
