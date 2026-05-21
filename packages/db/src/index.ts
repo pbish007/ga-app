@@ -52,6 +52,12 @@ export type {
   NewUserCredential,
   UserCredential,
 } from "./schema/credentials.js";
+export type {
+  Aircraft,
+  AircraftTimeSource,
+  NewAircraft,
+} from "./schema/aircraft.js";
+export { AIRCRAFT_TIME_SOURCES } from "./schema/aircraft.js";
 export { setupTestDb, type TestDb } from "./test/pglite.js";
 export {
   TENANT_APP_ROLE,

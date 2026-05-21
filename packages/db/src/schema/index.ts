@@ -3,3 +3,4 @@ export * from "./accounts.js";
 export * from "./documents.js";
 export * from "./roles.js";
 export * from "./credentials.js";
+export * from "./aircraft.js";
