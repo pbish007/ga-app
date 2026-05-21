@@ -35,3 +35,16 @@ export {
   type ResolveSquawkInput,
   type SquawkWithPhotos,
 } from "./squawk-service.js";
+export {
+  MaintenanceEntryAircraftNotFoundError,
+  MaintenanceEntryAlreadySignedError,
+  MaintenanceEntryNotAuthorizedToSignError,
+  MaintenanceEntryNotFoundError,
+  MaintenanceEntryService,
+  MaintenanceEntryTemplateNotFoundError,
+  MaintenanceEntryValidationError,
+  recommendRtsTemplateCode,
+  renderRtsTemplate,
+  type DraftMaintenanceEntryInput,
+  type SignMaintenanceEntryInput,
+} from "./maintenance-entry-service.js";
