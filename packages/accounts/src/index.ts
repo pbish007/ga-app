@@ -25,3 +25,12 @@ export {
   type RenderedInviteEmail,
   type SendInvitationDeps,
 } from "./invitations.js";
+export {
+  PermissionsMatrix,
+  attachPermissions,
+  hasPermission,
+  loadPermissionsMatrix,
+  type MembershipWithPermissions,
+  type Permission,
+  type Role,
+} from "./permissions.js";
