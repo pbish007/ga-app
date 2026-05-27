@@ -5,6 +5,7 @@ import { APP_ROLE_CODES, type AppRoleCode } from "./accounts.js";
 export const APP_PERMISSION_CODES = [
   "aircraft.read",
   "aircraft.write",
+  "aircraft.change_regime",
   "inspection.read",
   "inspection.write",
   "signoff.create",

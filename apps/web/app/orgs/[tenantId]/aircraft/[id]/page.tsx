@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { inArray } from "drizzle-orm";
 
+import { schema as dbSchema } from "@ga/db";
 import {
   AircraftNotFoundError,
+  AircraftRegimeChangeService,
   AircraftService,
   ComponentService,
   type AircraftDb,
@@ -13,6 +16,8 @@ import {
   NOT_AIRWORTHINESS_CAUTION,
   pageShellStyles as s,
 } from "../../../../../lib/page-shell";
+
+const { regimes } = dbSchema;
 
 export const dynamic = "force-dynamic";
 
@@ -32,15 +37,36 @@ export default async function AircraftDetailPage({
     tenantId,
     "aircraft.read",
     async (tx, ctx) => {
-      const aircraftSvc = new AircraftService(tx as unknown as AircraftDb);
-      const componentSvc = new ComponentService(tx as unknown as AircraftDb);
+      const db = tx as unknown as AircraftDb;
+      const aircraftSvc = new AircraftService(db);
+      const componentSvc = new ComponentService(db);
+      const regimeChangeSvc = new AircraftRegimeChangeService(db);
       try {
         const aircraft = await aircraftSvc.getById(ctx.tenantId, id);
-        const installed = await componentSvc.listInstalledOnAircraft(
-          ctx.tenantId,
-          aircraft.id,
+        const [installed, regimeChanges] = await Promise.all([
+          componentSvc.listInstalledOnAircraft(ctx.tenantId, aircraft.id),
+          regimeChangeSvc.listForAircraft(ctx.tenantId, aircraft.id),
+        ]);
+        const regimeIds = new Set<string>([aircraft.regimeId]);
+        for (const change of regimeChanges) {
+          regimeIds.add(change.fromRegimeId);
+          regimeIds.add(change.toRegimeId);
+        }
+        const regimeRows = regimeIds.size
+          ? await db
+              .select({ id: regimes.id, code: regimes.code, name: regimes.name })
+              .from(regimes)
+              .where(inArray(regimes.id, [...regimeIds]))
+          : [];
+        const regimeByIdEntries = regimeRows.map(
+          (r) => [r.id, { code: r.code, name: r.name }] as const,
         );
-        return { aircraft, installed };
+        return {
+          aircraft,
+          installed,
+          regimeChanges,
+          regimeById: Object.fromEntries(regimeByIdEntries),
+        };
       } catch (err) {
         if (err instanceof AircraftNotFoundError) return null;
         throw err;
@@ -50,7 +76,8 @@ export default async function AircraftDetailPage({
 
   if (!data) notFound();
 
-  const { aircraft, installed } = data;
+  const { aircraft, installed, regimeChanges, regimeById } = data;
+  const currentRegime = regimeById[aircraft.regimeId];
 
   return (
     <main style={s.main}>
@@ -110,9 +137,55 @@ export default async function AircraftDetailPage({
               label="Time source"
               value={aircraft.timeSource === "hobbs" ? "Hobbs" : "Tach"}
             />
+            <Row
+              label="Regulatory regime"
+              value={
+                currentRegime
+                  ? `${currentRegime.code} — ${currentRegime.name}`
+                  : aircraft.regimeId
+              }
+            />
           </tbody>
         </table>
       </div>
+
+      <h2 style={s.h2}>Regime history ({regimeChanges.length})</h2>
+      {regimeChanges.length === 0 ? (
+        <p style={s.muted}>
+          No regime changes recorded. This aircraft has stayed on its birth regime.
+        </p>
+      ) : (
+        <div style={s.tableWrap}>
+          <table style={s.table}>
+            <thead>
+              <tr>
+                <th style={s.th}>When</th>
+                <th style={s.th}>From</th>
+                <th style={s.th}>To</th>
+                <th style={s.th}>Actor (user id)</th>
+                <th style={s.th}>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {regimeChanges.map((change) => {
+                const from = regimeById[change.fromRegimeId];
+                const to = regimeById[change.toRegimeId];
+                return (
+                  <tr key={change.id}>
+                    <td style={s.td}>
+                      {change.createdAt.toISOString().slice(0, 10)}
+                    </td>
+                    <td style={s.td}>{from ? from.code : change.fromRegimeId}</td>
+                    <td style={s.td}>{to ? to.code : change.toRegimeId}</td>
+                    <td style={s.td}>{change.actorUserId}</td>
+                    <td style={s.td}>{change.reason}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <h2 style={s.h2}>Installed components ({installed.length})</h2>
       {installed.length === 0 ? (

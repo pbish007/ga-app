@@ -7,6 +7,15 @@ export {
   type UpdateAirframeTotalTimeInput,
 } from "./aircraft-service.js";
 export {
+  AircraftRegimeChangeAircraftNotFoundError,
+  AircraftRegimeChangeRegimeNotFoundError,
+  AircraftRegimeChangeService,
+  AircraftRegimeChangeValidationError,
+  REGIME_CHANGE_RETENTION_RECORD_KIND,
+  type ChangeRegimeInput,
+  type ChangeRegimeResult,
+} from "./aircraft-regime-change-service.js";
+export {
   FlightTimeMonotonicError,
   FlightTimeService,
   FlightTimeValidationError,

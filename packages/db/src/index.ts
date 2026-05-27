@@ -59,9 +59,11 @@ export type {
 export type {
   Aircraft,
   AircraftInspectionSubscription,
+  AircraftRegimeChange,
   AircraftTimeSource,
   NewAircraft,
   NewAircraftInspectionSubscription,
+  NewAircraftRegimeChange,
 } from "./schema/aircraft.js";
 export { AIRCRAFT_TIME_SOURCES } from "./schema/aircraft.js";
 export type {

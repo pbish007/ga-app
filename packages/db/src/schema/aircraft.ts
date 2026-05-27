@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-import { organizations } from "./accounts.js";
+import { organizations, users } from "./accounts.js";
 import { regimes, regimeInspectionProgramTemplates } from "./regime.js";
 
 /**
@@ -166,3 +166,60 @@ export type AircraftInspectionSubscription =
   typeof aircraftInspectionSubscriptions.$inferSelect;
 export type NewAircraftInspectionSubscription =
   typeof aircraftInspectionSubscriptions.$inferInsert;
+
+/**
+ * Append-only audit log for K2 regime changes (PMB-18). Every mutation
+ * of `aircraft.regime_id` lands here with the actor, the from/to
+ * regime ids, a timestamp, and an operator-supplied reason. Retention
+ * for these rows is `regime_change` on {@link regimeRetentionRules};
+ * the application MUST NOT hardcode a retention period for them.
+ *
+ * The table is enforced append-only at three layers:
+ *   * DB grant — `tenant_app` has SELECT/INSERT only, no UPDATE.
+ *   * Trigger — `BEFORE UPDATE` raises an exception (belt and braces).
+ *   * Schema  — no update path is exported from the service layer.
+ */
+export const aircraftRegimeChanges = pgTable(
+  "aircraft_regime_changes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    aircraftId: uuid("aircraft_id")
+      .notNull()
+      .references(() => aircraft.id, { onDelete: "cascade" }),
+    fromRegimeId: uuid("from_regime_id")
+      .notNull()
+      .references(() => regimes.id, { onDelete: "restrict" }),
+    toRegimeId: uuid("to_regime_id")
+      .notNull()
+      .references(() => regimes.id, { onDelete: "restrict" }),
+    actorUserId: uuid("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("aircraft_regime_changes_tenant_idx").on(t.tenantId),
+    aircraftIdx: index("aircraft_regime_changes_aircraft_idx").on(
+      t.aircraftId,
+      t.createdAt,
+    ),
+    distinctRegimes: check(
+      "aircraft_regime_changes_distinct_regimes",
+      sql`${t.fromRegimeId} <> ${t.toRegimeId}`,
+    ),
+    reasonNonempty: check(
+      "aircraft_regime_changes_reason_nonempty",
+      sql`length(trim(${t.reason})) > 0`,
+    ),
+  }),
+);
+
+export type AircraftRegimeChange = typeof aircraftRegimeChanges.$inferSelect;
+export type NewAircraftRegimeChange =
+  typeof aircraftRegimeChanges.$inferInsert;
