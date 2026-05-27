@@ -32,8 +32,10 @@ case "$DATABASE_URL_DIRECT" in
 esac
 
 # Sample tables = regime spine + every domain table the migrations create.
-# Listed explicitly so a renamed table in a future migration breaks the drill
-# loudly instead of being silently skipped.
+# Verified against `pg_tables WHERE schemaname='public'` after migrations
+# 0001..0014 were applied on 2026-05-27 (J1.2 drill). Listed explicitly so a
+# renamed or dropped table in a future migration breaks the drill loudly
+# instead of being silently skipped.
 SAMPLE_TABLES=(
   schema_migrations
   regimes
@@ -42,20 +44,26 @@ SAMPLE_TABLES=(
   regime_credential_types
   regime_rts_templates
   regime_retention_rules
-  accounts
-  account_memberships
+  regime_inspection_program_intervals
+  organizations
+  organization_memberships
+  users
+  invitations
   documents
-  roles
+  app_roles
+  app_permissions
+  app_role_permissions
   user_credentials
   aircraft
   components
+  component_installations
   flight_time_entries
-  inspection_program_intervals
   aircraft_inspection_subscriptions
   squawks
+  squawk_photos
   maintenance_entries
   notification_preferences
-  notification_ledger
+  notifications
   email_outbox
 )
 

@@ -79,13 +79,21 @@ Is the database visibly broken (errors, missing rows, corrupt data)?
 
 ### 3.2 Prerequisites — verify before restoring
 
-1. **You can log into Neon.** Console URL: <https://console.neon.tech>. Project:
-   `ga-app-prod` (replace with the actual slug once provisioned).
+1. **You can log into Neon.** Console URL: <https://console.neon.tech>.
+   Organization: **Patrick** (`org-snowy-violet-63023497`). Project: human
+   name **`ga-app-prod`**, project slug **`royal-darkness-36853636`**,
+   region `aws-us-east-2`, Postgres 17. The slug is what shows up in the
+   URL bar and what the Neon API expects.
 2. **You have a working psql.** macOS:
    `brew install postgresql@17`. Verify: `psql --version` ≥ 14.
 3. **You have the current `DATABASE_URL_DIRECT`.** This is the direct
    (non-pooled) connection string. Pooled connections cannot be used for
-   restore-style admin work.
+   restore-style admin work. As of 2026-05-27 the direct host is
+   `ep-wispy-block-aj56ake7.c-3.us-east-2.aws.neon.tech`; the pooled host
+   is the same with `-pooler` appended. Both are also set on the Vercel
+   `ga-app` project as `DATABASE_URL_DIRECT` and `DATABASE_URL`
+   respectively (Production scope), so `vercel env pull` works as a
+   fallback if the Neon console is unreachable.
 4. **You have a place to send the recovered DB.** Default plan: restore into
    a **new Neon branch**, validate the data, then promote that branch to
    primary by swapping `DATABASE_URL` in Vercel. **Do not** restore over the
@@ -96,7 +104,9 @@ Is the database visibly broken (errors, missing rows, corrupt data)?
 Use this when you know the timestamp to roll back to.
 
 1. Neon console → project `ga-app-prod` → **Branches** → **Create branch**.
-2. **Parent branch:** `main` (or whichever branch is currently primary).
+2. **Parent branch:** `production` (this is what the default/primary branch
+   is actually named in our Neon project — `main` is the conventional
+   default Neon assigns, but our project was created with `production`).
 3. **From point in time:** select the timestamp **just before** the event
    you're recovering from. Neon's selector is in your local timezone — log
    the chosen UTC timestamp in the incident ticket.
@@ -239,4 +249,4 @@ immediately) or a runbook gap — note it in §5 and patch this document.
 
 | Date       | Tier   | Operator | Result | Notes / linked issue |
 | ---------- | ------ | -------- | ------ | -------------------- |
-| *(empty — J1.2 will write the first row)* | | | | [PMB-22](/PMB/issues/PMB-22) |
+| 2026-05-27 | Phase A (Neon Free) | CTO ([@Founding Engineer](agent://cc7304c9-2164-4f4b-a9d1-c2e12cd1440e)) | **PASS** — 28/28 sample tables match (regime spine + RBAC populated, domain tables empty on both sides); restore 11s, verify 23s, total 34s, vs Phase A RTO budget 7200s. | [PMB-22](/PMB/issues/PMB-22), `drill-out/report.json` attached to the issue. Two runbook gaps caught and patched in the same commit: §3.2 project slug + §3.3 default branch name (`production`, not `main`). |
