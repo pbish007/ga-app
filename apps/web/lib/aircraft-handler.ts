@@ -1,7 +1,9 @@
+import { and, eq, ne } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import {
   AIRCRAFT_TIME_SOURCES,
+  schema,
   type Aircraft,
   type AircraftTimeSource,
   type Component,
@@ -14,6 +16,45 @@ import {
   ComponentService,
   type AircraftDb,
 } from "@ga/aircraft";
+
+/**
+ * Subscribe a freshly-created aircraft to every non-custom inspection
+ * program its regime owns, anchored at the moment of creation. This is
+ * onboarding policy, not engine logic: the program set is read from the
+ * regime catalog (data-driven, D1 seam), and the interval engine stays
+ * regime-agnostic. It means a new owner sees a real Due Dashboard
+ * immediately instead of an empty one.
+ *
+ * Custom-cadence programs (e.g. progressive) carry no intervals and need
+ * per-aircraft setup, so they are excluded from the default subscription.
+ * Runs inside the request's tenant transaction (RLS-scoped).
+ */
+async function autoSubscribeInspectionPrograms(
+  db: AircraftDb,
+  tenantId: string,
+  aircraft: Aircraft,
+): Promise<void> {
+  const programs = await db
+    .select({ id: schema.regimeInspectionProgramTemplates.id })
+    .from(schema.regimeInspectionProgramTemplates)
+    .where(
+      and(
+        eq(schema.regimeInspectionProgramTemplates.regimeId, aircraft.regimeId),
+        ne(schema.regimeInspectionProgramTemplates.cadenceKind, "custom"),
+      ),
+    );
+  if (programs.length === 0) return;
+  await db.insert(schema.aircraftInspectionSubscriptions).values(
+    programs.map((p) => ({
+      tenantId,
+      aircraftId: aircraft.id,
+      programId: p.id,
+      lastCompliedAt: aircraft.createdAt,
+      lastCompliedAirframeTime: aircraft.airframeTotalTime,
+      lastCompliedCycles: 0,
+    })),
+  );
+}
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -187,6 +228,7 @@ export async function handleAircraftCreate(
       yearManufactured: yearRaw ?? null,
       airframeTotalTime: ttRaw ?? 0,
     });
+    await autoSubscribeInspectionPrograms(ctx.db, ctx.tenantId, row);
     return NextResponse.json(serializeAircraft(row), { status: 201 });
   } catch (err) {
     if (err instanceof AircraftValidationError) {
