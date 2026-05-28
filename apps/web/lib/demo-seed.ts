@@ -56,8 +56,18 @@ export async function bootstrapAndSeed(
   const sql = postgres(databaseUrl, { prepare: false });
   let tenantRoleGranted = false;
   try {
-    // ---- (1) Role-membership fix (migration 0016 applied at runtime) ----
+    // ---- (1) Role grants (migration 0016 applied at runtime) ----
+    // Membership so the app role may `SET ROLE tenant_app`, plus SELECT on
+    // the global regime reference tables the tenant path reads.
     await sql`GRANT tenant_app TO current_user`;
+    await sql`GRANT SELECT ON regimes TO tenant_app`;
+    await sql`GRANT SELECT ON regime_inspection_program_templates TO tenant_app`;
+    await sql`GRANT SELECT ON regime_inspection_program_intervals TO tenant_app`;
+    await sql`GRANT SELECT ON regime_credential_types TO tenant_app`;
+    await sql`GRANT SELECT ON regime_rts_templates TO tenant_app`;
+    await sql`GRANT SELECT ON regime_directive_sources TO tenant_app`;
+    await sql`GRANT SELECT ON regime_retention_rules TO tenant_app`;
+    await sql`GRANT SELECT (id) ON users TO tenant_app`;
     tenantRoleGranted = true;
 
     // ---- Lookups (regime catalog is global reference data) ----
