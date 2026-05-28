@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 import { AircraftService, ComponentService } from "@ga/aircraft";
 
 import {
@@ -52,10 +52,16 @@ function jsonRequest(body: unknown): Request {
 
 describe("handleAircraftCreate (B1.2)", () => {
   let db: TestDb;
+  let reset: () => Promise<void>;
   let s: Seed;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
   beforeEach(async () => {
-    db = await setupTestDb();
     s = await seed(db);
+  });
+  afterEach(async () => {
+    await reset();
   });
 
   it("creates an aircraft and returns 201 with the serialized row", async () => {
@@ -114,8 +120,16 @@ describe("handleAircraftCreate (B1.2)", () => {
 });
 
 describe("handleAircraftList (B1.2)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   it("lists aircraft for the tenant only", async () => {
-    const db = await setupTestDb();
     const a = await seed(db);
     const b = await seed(db);
     const svc = new AircraftService(db);
@@ -153,8 +167,16 @@ describe("handleAircraftList (B1.2)", () => {
 });
 
 describe("handleAircraftGet (B1.2)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   it("returns the aircraft plus its currently-installed components", async () => {
-    const db = await setupTestDb();
     const { tenantId } = await seed(db);
     const aircraftSvc = new AircraftService(db);
     const componentSvc = new ComponentService(db);
@@ -204,7 +226,6 @@ describe("handleAircraftGet (B1.2)", () => {
   });
 
   it("returns 404 for an unknown id", async () => {
-    const db = await setupTestDb();
     const { tenantId } = await seed(db);
     const res = await handleAircraftGet(
       new Request("https://example.test/x"),
@@ -218,7 +239,6 @@ describe("handleAircraftGet (B1.2)", () => {
   });
 
   it("returns 400 for a non-UUID id", async () => {
-    const db = await setupTestDb();
     const { tenantId } = await seed(db);
     const res = await handleAircraftGet(
       new Request("https://example.test/x"),

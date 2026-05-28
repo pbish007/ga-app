@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import {
   AircraftNotFoundError,
@@ -23,8 +23,16 @@ async function seedTenant(db: TestDb, name: string): Promise<string> {
 }
 
 describe("AircraftService (B1)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   it("creates an aircraft and resolves the FAA regime by default", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Owner-Operator A");
     const svc = new AircraftService(db);
 
@@ -50,7 +58,6 @@ describe("AircraftService (B1)", () => {
   });
 
   it("rejects invalid timeSource at the validation layer", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Owner");
     const svc = new AircraftService(db);
     await expect(
@@ -69,7 +76,6 @@ describe("AircraftService (B1)", () => {
   });
 
   it("updates airframe total time", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Owner");
     const svc = new AircraftService(db);
     const ac = await svc.create({
@@ -93,7 +99,6 @@ describe("AircraftService (B1)", () => {
   });
 
   it("getById fails for an unknown id", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Owner");
     const svc = new AircraftService(db);
     await expect(
@@ -102,7 +107,6 @@ describe("AircraftService (B1)", () => {
   });
 
   it("listForTenant returns only the requesting tenant's aircraft", async () => {
-    const db = await setupTestDb();
     const a = await seedTenant(db, "A");
     const b = await seedTenant(db, "B");
     const svc = new AircraftService(db);

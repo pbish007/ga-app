@@ -1,7 +1,7 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, afterEach } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb, schema as dbSchema } from "@ga/db";
+import { setupTestSuite, type TestDb, schema as dbSchema } from "@ga/db";
 
 import {
   CrossTenantDocumentAccessError,
@@ -29,13 +29,21 @@ async function seedOrg(db: TestDb, name: string): Promise<string> {
 
 describe("DocumentsService (J2.1)", () => {
   let db: TestDb;
+  let reset: () => Promise<void>;
   let driver: MemoryBlobDriver;
   let service: DocumentsService;
   let tenantA: string;
   let tenantB: string;
 
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+
+  afterEach(async () => {
+    await reset();
+  });
+
   beforeEach(async () => {
-    db = await setupTestDb();
     driver = new MemoryBlobDriver();
     service = new DocumentsService(db, driver, "memory");
     tenantA = await seedOrg(db, "Cessna Club A");

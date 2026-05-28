@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { setupTestDb, type TestDb, schema as dbSchema } from "@ga/db";
+import { setupTestSuite, type TestDb, schema as dbSchema } from "@ga/db";
 import { DEFAULT_REGIME_CODE, RegimeClient } from "@ga/regime";
 
 import {
@@ -18,8 +18,10 @@ import {
 
 const { emailOutbox, organizations, organizationMemberships, users } = dbSchema;
 
+let db: TestDb;
+let reset: () => Promise<void>;
+
 async function bootstrap(): Promise<{ db: TestDb; admin: { id: string } }> {
-  const db = await setupTestDb();
   // Seed an admin user to act as the inviter — invitations require
   // invited_by_user_id.
   const [admin] = await db
@@ -36,9 +38,12 @@ async function bootstrap(): Promise<{ db: TestDb; admin: { id: string } }> {
 }
 
 describe("A1.1 accounts schema (PMB-27)", () => {
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+
   describe("schema migration", () => {
     it("creates all five accounts tables on top of the regime spine", async () => {
-      const db = await setupTestDb();
       const result = await db.execute<{ table_name: string }>(
         sql`select table_name from information_schema.tables where table_schema = 'public' order by table_name`,
       );
@@ -404,6 +409,7 @@ describe("A1.1 accounts schema (PMB-27)", () => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
+  await reset();
 });

@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import {
   AircraftService,
@@ -70,8 +70,16 @@ async function seedDocument(
 }
 
 describe("SquawkService (E1)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   it("files a squawk with severity and reporter", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org A");
     const userId = await seedUser(db, "pilot@a.test");
     const ac = await seedAircraft(db, tenantId, "N111A");
@@ -93,7 +101,6 @@ describe("SquawkService (E1)", () => {
   });
 
   it("rejects empty description and invalid severity at the app layer", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org B");
     const ac = await seedAircraft(db, tenantId, "N222B");
     const svc = new SquawkService(db);
@@ -117,7 +124,6 @@ describe("SquawkService (E1)", () => {
   });
 
   it("rejects filing against an aircraft from another tenant", async () => {
-    const db = await setupTestDb();
     const tenantA = await seedTenant(db, "Org A");
     const tenantB = await seedTenant(db, "Org B");
     const acB = await seedAircraft(db, tenantB, "N999X");
@@ -133,7 +139,6 @@ describe("SquawkService (E1)", () => {
   });
 
   it("attaches photos from documents (J2.1) and persists join rows", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org C");
     const ac = await seedAircraft(db, tenantId, "N333C");
     const docA = await seedDocument(db, tenantId, "overview.jpg");
@@ -157,7 +162,6 @@ describe("SquawkService (E1)", () => {
   });
 
   it("rejects a photo belonging to another tenant", async () => {
-    const db = await setupTestDb();
     const tenantA = await seedTenant(db, "Org A");
     const tenantB = await seedTenant(db, "Org B");
     const ac = await seedAircraft(db, tenantA, "N444D");
@@ -181,7 +185,6 @@ describe("SquawkService (E1)", () => {
   });
 
   it("listOpenGroundingForAircraft returns only open grounding squawks", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org D");
     const ac = await seedAircraft(db, tenantId, "N555E");
     const svc = new SquawkService(db);
@@ -220,7 +223,6 @@ describe("SquawkService (E1)", () => {
   });
 
   it("resolve sets status to resolved with resolved_at and is not double-resolvable", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org E");
     const mechanic = await seedUser(db, "mech@e.test");
     const ac = await seedAircraft(db, tenantId, "N666F");
@@ -248,7 +250,6 @@ describe("SquawkService (E1)", () => {
   });
 
   it("db CHECK constraint blocks invalid severity bypass", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org F");
     const ac = await seedAircraft(db, tenantId, "N777G");
     await expect(

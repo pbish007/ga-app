@@ -1,6 +1,6 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, beforeEach } from "vitest";
 
-import { setupTestDb, type TestDb, schema as dbSchema } from "@ga/db";
+import { setupTestSuite, type TestDb, schema as dbSchema } from "@ga/db";
 import { DocumentsService, MemoryBlobDriver } from "@ga/storage";
 
 import {
@@ -42,13 +42,21 @@ describe("attachments handlers (PMB-20)", () => {
   let service: DocumentsService;
   let tenantA: string;
   let tenantB: string;
+  let reset: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
 
   beforeEach(async () => {
-    db = await setupTestDb();
     const driver = new MemoryBlobDriver();
     service = new DocumentsService(db, driver, "memory");
     tenantA = await seedOrg(db, "Tenant A");
     tenantB = await seedOrg(db, "Tenant B");
+  });
+
+  afterEach(async () => {
+    await reset();
   });
 
   it("round-trips upload → retrieve and preserves bytes/content-type/filename", async () => {
@@ -168,9 +176,13 @@ describe("J2.2 signed-URL handlers (PMB-23)", () => {
   let tenantA: string;
   let tenantB: string;
   let documentId: string;
+  let reset: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
 
   beforeEach(async () => {
-    db = await setupTestDb();
     const driver = new MemoryBlobDriver();
     service = new DocumentsService(db, driver, "memory");
     tenantA = await seedOrg(db, "Org A");
@@ -195,6 +207,10 @@ describe("J2.2 signed-URL handlers (PMB-23)", () => {
     );
     const created = (await uploadRes.json()) as { id: string };
     documentId = created.id;
+  });
+
+  afterEach(async () => {
+    await reset();
   });
 
   it("mints a signed URL and the download endpoint redeems it", async () => {

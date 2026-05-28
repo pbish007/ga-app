@@ -1,12 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll, afterEach } from "vitest";
 
-import { setupTestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import { RegimeClient, DEFAULT_REGIME_CODE } from "../src/index.js";
 
 describe("regime spine (PMB-8 / Epic K)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   it("seeds the FAA regime from the first migration", async () => {
-    const db = await setupTestDb();
     const regimes = new RegimeClient(db);
 
     const faa = await regimes.getByCode(DEFAULT_REGIME_CODE);
@@ -81,7 +89,6 @@ describe("regime spine (PMB-8 / Epic K)", () => {
     // Boot the database. Only migration 0001 has run; no CARS-specific
     // migration exists. The fact that this whole test succeeds with a
     // pure series of INSERTs is the K1 seam acceptance criterion.
-    const db = await setupTestDb();
     const regimes = new RegimeClient(db);
 
     expect((await regimes.list()).map((r) => r.code)).toEqual(["FAA"]);
@@ -179,7 +186,6 @@ describe("regime spine (PMB-8 / Epic K)", () => {
   });
 
   it("supports whichever-comes-first via multiple interval rows", async () => {
-    const db = await setupTestDb();
     const regimes = new RegimeClient(db);
 
     const cars = await regimes.createBundle({
@@ -206,7 +212,6 @@ describe("regime spine (PMB-8 / Epic K)", () => {
   });
 
   it("regime lookup by missing code raises a typed error", async () => {
-    const db = await setupTestDb();
     const regimes = new RegimeClient(db);
 
     await expect(regimes.getByCode("EASA")).rejects.toThrow(

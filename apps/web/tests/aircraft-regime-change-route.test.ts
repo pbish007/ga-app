@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
 import {
   schema as dbSchema,
   runAsTenant,
-  setupTestDb,
+  setupTestSuite,
   type TestDb,
 } from "@ga/db";
 import {
@@ -42,19 +43,28 @@ interface Seed {
   aircraftId: string;
 }
 
+/**
+ * CARS is regime reference data, so it is seeded once per suite alongside
+ * the migration (in `beforeAll`) rather than per test. `reset` preserves
+ * catalog rows, so the per-test `seed()` reads it back by code.
+ */
+async function seedCarsCatalog(db: TestDb): Promise<void> {
+  await db.insert(regimes).values({
+    code: "CARS",
+    name: "Canadian Aviation Regulations",
+    jurisdiction: "Canada",
+  });
+}
+
 async function seed(db: TestDb): Promise<Seed> {
-  const [faa] = await db.select().from(regimes);
+  const [faa] = await db.select().from(regimes).where(eq(regimes.code, "FAA"));
   if (!faa) throw new Error("FAA regime seed missing");
 
   const [cars] = await db
-    .insert(regimes)
-    .values({
-      code: "CARS",
-      name: "Canadian Aviation Regulations",
-      jurisdiction: "Canada",
-    })
-    .returning();
-  if (!cars) throw new Error("seed cars failed");
+    .select()
+    .from(regimes)
+    .where(eq(regimes.code, "CARS"));
+  if (!cars) throw new Error("CARS regime seed missing");
 
   const [org] = await db
     .insert(organizations)
@@ -137,13 +147,22 @@ function authedPost(
 
 describe("aircraft.change_regime role gate (PMB-18 + PMB-10)", () => {
   let db: TestDb;
+  let reset: () => Promise<void>;
   let matrix: PermissionsMatrix;
   let s: Seed;
 
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+    await seedCarsCatalog(db);
+  });
+
   beforeEach(async () => {
-    db = await setupTestDb();
     matrix = await loadPermissionsMatrix(db);
     s = await seed(db);
+  });
+
+  afterEach(async () => {
+    await reset();
   });
 
   const buildHandler = () =>

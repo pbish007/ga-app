@@ -1,12 +1,13 @@
 import { sql } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
   APP_PERMISSION_CODES,
   APP_ROLE_CODES,
-  setupTestDb,
+  setupTestSuite,
   type AppPermissionCode,
   type AppRoleCode,
+  type TestDb,
 } from "@ga/db";
 
 import {
@@ -54,8 +55,16 @@ function syntheticMembership(role: AppRoleCode) {
 
 describe("A2.1 roles & permissions matrix (PMB-32)", () => {
   describe("seed migration", () => {
+    let db: TestDb;
+    let reset: () => Promise<void>;
+    beforeAll(async () => {
+      ({ db, reset } = await setupTestSuite());
+    });
+    afterEach(async () => {
+      await reset();
+    });
+
     it("seeds the matrix exactly as the expected truth table", async () => {
-      const db = await setupTestDb();
       const matrix = await loadPermissionsMatrix(db);
       for (const role of APP_ROLE_CODES) {
         const got = matrix.permissionsFor(role);
@@ -68,7 +77,6 @@ describe("A2.1 roles & permissions matrix (PMB-32)", () => {
     });
 
     it("FKs organization_memberships.role onto app_roles", async () => {
-      const db = await setupTestDb();
       // Bogus role at the SQL boundary — proves the FK on the membership
       // table is the real gate. (gen_random_uuid for tenant/user is fine;
       // they don't have to resolve — Postgres validates the role FK first
@@ -82,8 +90,16 @@ describe("A2.1 roles & permissions matrix (PMB-32)", () => {
   });
 
   describe("hasPermission (pure helper)", () => {
+    let db: TestDb;
+    let reset: () => Promise<void>;
+    beforeAll(async () => {
+      ({ db, reset } = await setupTestSuite());
+    });
+    afterEach(async () => {
+      await reset();
+    });
+
     it("is exhaustive — every (role, permission) pair matches the truth table", async () => {
-      const db = await setupTestDb();
       const matrix = await loadPermissionsMatrix(db);
       for (const role of APP_ROLE_CODES) {
         const membership = attachPermissions(syntheticMembership(role), matrix);
@@ -98,7 +114,6 @@ describe("A2.1 roles & permissions matrix (PMB-32)", () => {
     });
 
     it("denies an unknown role code (deny-by-default)", async () => {
-      const db = await setupTestDb();
       const matrix = await loadPermissionsMatrix(db);
       const membership = attachPermissions(
         syntheticMembership("captain" as unknown as AppRoleCode),
@@ -112,7 +127,6 @@ describe("A2.1 roles & permissions matrix (PMB-32)", () => {
     });
 
     it("denies an unknown permission code (deny-by-default)", async () => {
-      const db = await setupTestDb();
       const matrix = await loadPermissionsMatrix(db);
       const adminMembership = attachPermissions(
         syntheticMembership("admin"),

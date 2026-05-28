@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 import { AircraftService } from "@ga/aircraft";
 
 import {
@@ -23,11 +23,9 @@ async function seed(db: TestDb): Promise<Seed> {
   );
   const faaRegimeId = faa.rows[0]!.id;
 
-  const cars = await db.execute<{ id: string }>(sql`
-    insert into regimes (code, name, jurisdiction)
-    values ('CARS', 'Canadian Aviation Regulations', 'Canada')
-    returning id
-  `);
+  const cars = await db.execute<{ id: string }>(
+    sql`select id from regimes where code = 'CARS'`,
+  );
   const carsRegimeId = cars.rows[0]!.id;
 
   const orgs = await db.execute<{ id: string }>(sql`
@@ -57,6 +55,18 @@ async function seed(db: TestDb): Promise<Seed> {
   return { tenantId, faaRegimeId, carsRegimeId, userId, aircraftId: ac.id };
 }
 
+/**
+ * CARS is regime reference data, so it is seeded once per suite alongside
+ * the migration (in `beforeAll`) rather than per test. `reset` preserves
+ * catalog rows, so the per-test `seed()` reads it back by code.
+ */
+async function seedCarsCatalog(db: TestDb): Promise<void> {
+  await db.execute(sql`
+    insert into regimes (code, name, jurisdiction)
+    values ('CARS', 'Canadian Aviation Regulations', 'Canada')
+  `);
+}
+
 function postRequest(body: unknown): Request {
   return new Request("https://example.test/x", {
     method: "POST",
@@ -67,11 +77,20 @@ function postRequest(body: unknown): Request {
 
 describe("handleAircraftChangeRegime (PMB-18)", () => {
   let db: TestDb;
+  let reset: () => Promise<void>;
   let s: Seed;
 
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+    await seedCarsCatalog(db);
+  });
+
   beforeEach(async () => {
-    db = await setupTestDb();
     s = await seed(db);
+  });
+
+  afterEach(async () => {
+    await reset();
   });
 
   it("changes the regime, writes the audit row, returns 200", async () => {
@@ -202,11 +221,20 @@ describe("handleAircraftChangeRegime (PMB-18)", () => {
 
 describe("handleAircraftRegimeHistory (PMB-18)", () => {
   let db: TestDb;
+  let reset: () => Promise<void>;
   let s: Seed;
 
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+    await seedCarsCatalog(db);
+  });
+
   beforeEach(async () => {
-    db = await setupTestDb();
     s = await seed(db);
+  });
+
+  afterEach(async () => {
+    await reset();
   });
 
   it("returns an empty list before any change", async () => {

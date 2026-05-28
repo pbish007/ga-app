@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 import { AircraftService, SquawkService } from "@ga/aircraft";
 
 import {
@@ -58,13 +58,21 @@ describe("handleSquawkCreate (E1.2)", () => {
   let tenantId: string;
   let userId: string;
   let aircraftId: string;
+  let reset: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
 
   beforeEach(async () => {
-    db = await setupTestDb();
     tenantId = await seedTenant(db);
     userId = await seedUser(db, "pilot@test");
     const ac = await seedAircraft(db, tenantId, "N12345");
     aircraftId = ac.id;
+  });
+
+  afterEach(async () => {
+    await reset();
   });
 
   it("creates a squawk with severity=grounding and reporter from session", async () => {
@@ -136,8 +144,16 @@ describe("handleSquawkCreate (E1.2)", () => {
 });
 
 describe("handleSquawkList + handleSquawkResolve", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   it("lists squawks then resolves one", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db);
     const userId = await seedUser(db, "mech@test");
     const ac = await seedAircraft(db, tenantId, "N99999");
@@ -181,8 +197,16 @@ describe("handleSquawkList + handleSquawkResolve", () => {
 });
 
 describe("E1.3 — compliance dashboard surfaces grounding squawks", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   it("flips airworthiness to overdue when a grounding squawk is open", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db);
     const ac = await seedAircraft(db, tenantId, "N11111");
 
@@ -235,7 +259,6 @@ describe("E1.3 — compliance dashboard surfaces grounding squawks", () => {
   });
 
   it("a non-grounding open squawk does not affect airworthiness", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db);
     const ac = await seedAircraft(db, tenantId, "N22222");
     const svc = new SquawkService(db);

@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import {
   AircraftService,
@@ -44,8 +44,16 @@ async function seedAircraft(
 }
 
 describe("FlightTimeService (C1)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   it("logs a normal (monotonic) time entry and advances aircraft TT", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org A");
     const ac = await seedAircraft(db, tenantId, "N11111", 1000);
 
@@ -67,7 +75,6 @@ describe("FlightTimeService (C1)", () => {
   });
 
   it("allows equal readings (zero-flight log)", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org B");
     const ac = await seedAircraft(db, tenantId, "N22222", 500);
     const ftSvc = new FlightTimeService(db);
@@ -80,7 +87,6 @@ describe("FlightTimeService (C1)", () => {
   });
 
   it("rejects a lower reading without override (app layer)", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org C");
     const ac = await seedAircraft(db, tenantId, "N33333", 2000);
     const ftSvc = new FlightTimeService(db);
@@ -94,7 +100,6 @@ describe("FlightTimeService (C1)", () => {
   });
 
   it("accepts a lower reading when is_override=true with reason", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org D");
     const ac = await seedAircraft(db, tenantId, "N44444", 5000);
     const ftSvc = new FlightTimeService(db);
@@ -117,7 +122,6 @@ describe("FlightTimeService (C1)", () => {
   });
 
   it("rejects is_override=true without a reason (app layer)", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org E");
     const ac = await seedAircraft(db, tenantId, "N55555", 100);
     const ftSvc = new FlightTimeService(db);
@@ -132,7 +136,6 @@ describe("FlightTimeService (C1)", () => {
   });
 
   it("db trigger enforces monotonicity independently of app layer", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org F");
     const ac = await seedAircraft(db, tenantId, "N66666", 3000);
     // Bypass app layer by inserting directly.
@@ -147,7 +150,6 @@ describe("FlightTimeService (C1)", () => {
   });
 
   it("listForAircraft returns entries newest-first", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org G");
     const ac = await seedAircraft(db, tenantId, "N77777", 100);
     const ftSvc = new FlightTimeService(db);

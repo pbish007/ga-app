@@ -1,9 +1,9 @@
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
   schema as dbSchema,
-  setupTestDb,
+  setupTestSuite,
   type Regime,
   type RegimeCredentialType,
   type TestDb,
@@ -37,8 +37,10 @@ async function seedUser(db: TestDb): Promise<string> {
   return user.id;
 }
 
+let db: TestDb;
+let reset: () => Promise<void>;
+
 async function bootstrap(): Promise<Seeded> {
-  const db = await setupTestDb();
   const regimes = new RegimeClient(db);
   const faa = await regimes.getByCode(DEFAULT_REGIME_CODE);
   const [ap] = await db
@@ -51,6 +53,13 @@ async function bootstrap(): Promise<Seeded> {
 }
 
 describe("A2.3 credential-gated sign-off (PMB-34)", () => {
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   describe("CredentialService.canSignOff (FAA)", () => {
     it("returns false for a mechanic with no credential", async () => {
       const { service, faa, userId } = await bootstrap();

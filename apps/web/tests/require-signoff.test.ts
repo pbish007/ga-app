@@ -1,10 +1,10 @@
 import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   APP_ROLE_CODES,
   schema as dbSchema,
-  setupTestDb,
+  setupTestSuite,
   type TestDb,
   type AppRoleCode,
 } from "@ga/db";
@@ -48,8 +48,7 @@ function synthMembership(
   );
 }
 
-async function bootstrap(): Promise<Seeded> {
-  const db = await setupTestDb();
+async function bootstrap(db: TestDb): Promise<Seeded> {
   const [faa] = await db.select().from(regimes).where(eq(regimes.code, "FAA"));
   if (!faa) throw new Error("FAA regime seed missing");
   const [ap] = await db
@@ -109,9 +108,17 @@ async function seedCarsRegime(
 }
 
 describe("requireSignoff guard (PMB-34)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
   let s: Seeded;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
   beforeEach(async () => {
-    s = await bootstrap();
+    s = await bootstrap(db);
+  });
+  afterEach(async () => {
+    await reset();
   });
 
   it("403 when the role is mechanic but no credential is on file", async () => {

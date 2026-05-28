@@ -6,10 +6,10 @@
  * is exercised through a fake fetch.
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeAll, afterEach } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import { drainEmailOutbox } from "../src/drain.js";
 import {
@@ -53,9 +53,14 @@ async function enqueue(
 
 describe("H1.3 drainEmailOutbox (PMB-17)", () => {
   let db: TestDb;
+  let reset: () => Promise<void>;
 
-  beforeEach(async () => {
-    db = await setupTestDb();
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+
+  afterEach(async () => {
+    await reset();
   });
 
   it("marks rows sent when the mailer succeeds, in created_at order", async () => {

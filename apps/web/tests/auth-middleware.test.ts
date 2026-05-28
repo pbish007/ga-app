@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   schema as dbSchema,
   runAsTenant,
-  setupTestDb,
+  setupTestSuite,
   type TestDb,
 } from "@ga/db";
 import {
@@ -104,13 +104,21 @@ function authedRequest(
 
 describe("withRequest middleware (PMB-33)", () => {
   let db: TestDb;
+  let reset: () => Promise<void>;
   let matrix: PermissionsMatrix;
   let s: Seed;
 
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+
   beforeEach(async () => {
-    db = await setupTestDb();
     matrix = await loadPermissionsMatrix(db);
     s = await seed(db);
+  });
+
+  afterEach(async () => {
+    await reset();
   });
 
   it("401 when no session cookie is present", async () => {
@@ -268,11 +276,19 @@ describe("withRequest middleware (PMB-33)", () => {
 
 describe("handleLogin (PMB-33)", () => {
   let db: TestDb;
+  let reset: () => Promise<void>;
   let s: Seed;
 
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+
   beforeEach(async () => {
-    db = await setupTestDb();
     s = await seed(db);
+  });
+
+  afterEach(async () => {
+    await reset();
   });
 
   it("issues a signed session cookie on valid credentials", async () => {

@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import {
   AircraftService,
@@ -72,8 +72,16 @@ async function seedApCredential(
 }
 
 describe("MaintenanceEntryService (F1/F2)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   it("drafts an unsigned entry capturing work, date, time, type", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org A");
     const ac = await seedAircraft(db, tenantId, "N111A");
     const svc = new MaintenanceEntryService(db);
@@ -96,7 +104,6 @@ describe("MaintenanceEntryService (F1/F2)", () => {
   });
 
   it("rejects empty work and invalid entry type and bad date", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org B");
     const ac = await seedAircraft(db, tenantId, "N222B");
     const svc = new MaintenanceEntryService(db);
@@ -137,7 +144,6 @@ describe("MaintenanceEntryService (F1/F2)", () => {
   });
 
   it("refuses to sign without an authorising credential", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org C");
     const ac = await seedAircraft(db, tenantId, "N333C");
     const userId = await seedUser(db, "pilot@c.test");
@@ -165,7 +171,6 @@ describe("MaintenanceEntryService (F1/F2)", () => {
   });
 
   it("signs an annual with an A&P credential, freezes RTS body, snapshots certificate number", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org D");
     const ac = await seedAircraft(db, tenantId, "N444D");
     const mechId = await seedUser(db, "mech@d.test");
@@ -202,7 +207,6 @@ describe("MaintenanceEntryService (F1/F2)", () => {
   });
 
   it("post-sign UPDATE attempts are rejected by the DB trigger", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org E");
     const ac = await seedAircraft(db, tenantId, "N555E");
     const mechId = await seedUser(db, "mech@e.test");
@@ -233,7 +237,6 @@ describe("MaintenanceEntryService (F1/F2)", () => {
   });
 
   it("double-sign is rejected at the service layer", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org F");
     const ac = await seedAircraft(db, tenantId, "N666F");
     const mechId = await seedUser(db, "mech@f.test");
@@ -255,7 +258,6 @@ describe("MaintenanceEntryService (F1/F2)", () => {
   });
 
   it("corrections are new rows linked to the prior entry", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org G");
     const ac = await seedAircraft(db, tenantId, "N777G");
     const mechId = await seedUser(db, "mech@g.test");
@@ -308,7 +310,6 @@ describe("MaintenanceEntryService (F1/F2)", () => {
   });
 
   it("expired credential cannot sign", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Org H");
     const ac = await seedAircraft(db, tenantId, "N888H");
     const mechId = await seedUser(db, "mech@h.test");

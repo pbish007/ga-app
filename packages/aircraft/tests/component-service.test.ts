@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import {
   AircraftService,
@@ -46,8 +46,16 @@ async function seedAircraft(
 }
 
 describe("ComponentService.create", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   it("creates an engine with TBO hours", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Shop");
     const svc = new ComponentService(db);
     const engine = await svc.create({
@@ -63,7 +71,6 @@ describe("ComponentService.create", () => {
   });
 
   it("rejects non-positive TBO at the validation layer", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Shop");
     const svc = new ComponentService(db);
     await expect(
@@ -78,8 +85,16 @@ describe("ComponentService.create", () => {
 });
 
 describe("ComponentService.install / .remove (B2.2)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   it("installs a component and records airframe TT snapshot", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Shop");
     const aircraftId = await seedAircraft(db, tenantId, "N111", 1500);
     const svc = new ComponentService(db);
@@ -103,7 +118,6 @@ describe("ComponentService.install / .remove (B2.2)", () => {
   });
 
   it("rejects installing a component that is already installed", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Shop");
     const aircraftId = await seedAircraft(db, tenantId, "N111", 0);
     const svc = new ComponentService(db);
@@ -130,7 +144,6 @@ describe("ComponentService.install / .remove (B2.2)", () => {
   });
 
   it("removes an installation and snapshots airframe TT", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Shop");
     const aircraftId = await seedAircraft(db, tenantId, "N111", 1500);
     const svc = new ComponentService(db);
@@ -171,7 +184,6 @@ describe("ComponentService.install / .remove (B2.2)", () => {
   });
 
   it("rejects removing a component that is not installed", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Shop");
     await seedAircraft(db, tenantId, "N111", 0);
     const svc = new ComponentService(db);
@@ -192,7 +204,6 @@ describe("ComponentService.install / .remove (B2.2)", () => {
   it("preserves history and supports reinstallation on another aircraft", async () => {
     // The B2 epic DoD: "Removing a component preserves its history and
     // allows reinstallation on another aircraft — verified by automated test."
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Shop");
     const skyhawkId = await seedAircraft(db, tenantId, "N111", 1000);
     const cardinalId = await seedAircraft(db, tenantId, "N222", 2500);
@@ -251,7 +262,6 @@ describe("ComponentService.install / .remove (B2.2)", () => {
   });
 
   it("rejects removing earlier than installedAt at the validation layer", async () => {
-    const db = await setupTestDb();
     const tenantId = await seedTenant(db, "Shop");
     const aircraftId = await seedAircraft(db, tenantId, "N111", 0);
     const svc = new ComponentService(db);

@@ -6,10 +6,10 @@
  * cannot duplicate emails.
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeAll, afterEach } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 import { runNotificationSweep, type SweepDb } from "../src/sweep.js";
 
 // pglite + drizzle's execute return type satisfies the structural SweepDb
@@ -96,9 +96,14 @@ async function seedOverdueAnnual(
 
 describe("H1.2 notification sweep — idempotent fan-out (PMB-17)", () => {
   let db: TestDb;
+  let reset: () => Promise<void>;
 
-  beforeEach(async () => {
-    db = await setupTestDb();
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+
+  afterEach(async () => {
+    await reset();
   });
 
   it("creates one overdue notification and one email row, then is a no-op on re-run", async () => {

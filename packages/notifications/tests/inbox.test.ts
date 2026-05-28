@@ -2,10 +2,10 @@
  * H1.4 — in-app inbox reads (PMB-17).
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeAll, afterEach } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import {
   listUnseenNotificationsForUser,
@@ -68,8 +68,12 @@ async function seed(db: TestDb): Promise<{
 
 describe("H1.4 inbox (PMB-17)", () => {
   let db: TestDb;
-  beforeEach(async () => {
-    db = await setupTestDb();
+  let reset: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
   });
 
   it("lists unseen notifications and hides seen ones", async () => {

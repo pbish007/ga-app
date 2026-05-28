@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import {
   AircraftRegimeChangeAircraftNotFoundError,
@@ -26,10 +26,13 @@ async function seed(db: TestDb): Promise<Seed> {
   );
   const faaRegimeId = faa.rows[0]!.id;
 
-  // Add a synthetic second regime so we can actually change to it.
+  // Add a synthetic second regime so we can actually change to it. `regimes`
+  // is a catalog table that survives reset() between tests, so make this
+  // idempotent: insert once, then reuse the surviving row on later tests.
   const cars = await db.execute<{ id: string }>(sql`
     insert into regimes (code, name, jurisdiction)
     values ('CARS', 'Canadian Aviation Regulations', 'Canada')
+    on conflict (code) do update set name = excluded.name
     returning id
   `);
   const carsRegimeId = cars.rows[0]!.id;
@@ -78,10 +81,17 @@ async function makeAircraft(
 
 describe("AircraftRegimeChangeService (K2.2 / PMB-18)", () => {
   let db: TestDb;
+  let reset: () => Promise<void>;
   let s: Seed;
 
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+  afterEach(async () => {
+    await reset();
+  });
+
   beforeEach(async () => {
-    db = await setupTestDb();
     s = await seed(db);
   });
 
