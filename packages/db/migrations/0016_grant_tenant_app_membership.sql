@@ -1,0 +1,22 @@
+-- 0016_grant_tenant_app_membership.sql
+-- Epic A / PMB-61 — make the tenant RLS path usable at runtime.
+--
+-- Migrations 0002–0015 created the `tenant_app` role and granted table
+-- privileges TO it, but never granted membership in `tenant_app` back to
+-- the application's connection role. Postgres requires the connecting
+-- role to be a MEMBER of `tenant_app` before it may `SET ROLE tenant_app`.
+--
+-- Without this grant, every tenant-scoped request fails at
+-- `runAsTenantOnProductionDb` (`set local role tenant_app`) with:
+--   ERROR 42501: permission denied to set role "tenant_app"
+-- which 500s the aircraft / compliance / squawk / maintenance pages even
+-- for an authenticated, authorized member. (Identity reads — login,
+-- /orgs, membership lookup — bypass RLS on the connection role and so
+-- worked; only the role-switch path was broken.)
+--
+-- `current_user` is the application/migration role (the same role the
+-- runtime connects as via DATABASE_URL). It created `tenant_app`, so it
+-- holds ADMIN OPTION on that role and may grant membership to itself.
+-- Idempotent: re-granting an existing membership is a no-op.
+
+GRANT tenant_app TO current_user;
