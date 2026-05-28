@@ -7,10 +7,9 @@ name: DB migrate (production)
 # schema_migrations and re-runs are no-ops, so a dispatch with nothing new
 # pending is safe.
 #
-# The connection string is injected via Vercel CLI (`vercel env run`), which
-# pulls the sensitive DATABASE_URL_DIRECT env var from the Vercel production
-# environment at runtime — the value never lives in a file or GitHub secret.
-# Requires VERCEL_TOKEN and the Vercel project to be linked.
+# DATABASE_URL_DIRECT is a Vercel sensitive (write-only) env var that cannot
+# be read back via `vercel env run`, so it is stored as a GitHub Actions secret
+# and injected directly into the migrate step.
 
 on:
   workflow_dispatch:
@@ -22,23 +21,14 @@ concurrency:
 jobs:
   migrate:
     runs-on: ubuntu-latest
-    env:
-      VERCEL_ORG_ID: team_hT90B7bAfiEDDY73Q3ul8t75
-      VERCEL_PROJECT_ID: prj_Z8UAfPx4m73Kt1xp2SL9sLZW7OUc
     steps:
       - uses: actions/checkout@v5
-
-      - name: Install Vercel CLI
-        run: npm install --global vercel@latest
-
-      - name: Link Vercel project and pull production env
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
       # ubuntu-latest ships a postgresql-client (psql >= 14); no install step.
       - name: Confirm psql is available
         run: psql --version
 
-      - name: Apply pending migrations (via Vercel env injection)
-        run: |
-          vercel env run --environment=production --token=${{ secrets.VERCEL_TOKEN }} -- \
-            bash packages/db/scripts/migrate.sh
+      - name: Apply pending migrations
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.DATABASE_URL_DIRECT }}
+        run: bash packages/db/scripts/migrate.sh
