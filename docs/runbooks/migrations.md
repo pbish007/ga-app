@@ -4,12 +4,19 @@
 > **Scope:** GA App production Postgres, hosted on Neon (`ga-app-prod`).
 > **Owner of last resort:** CTO.
 
-This runbook is the canonical way schema changes reach production. It is the
-PMB-62 deliverable that replaces two stop-gaps used during the MVP front-door
-push:
+This runbook is the **intended** canonical way schema changes reach production.
+It is the PMB-62 deliverable that replaces two stop-gaps used during the MVP
+front-door push:
 
 - pasting a Neon key into an issue comment to run `migrate.sh` from a dev box, and
-- the runtime admin DDL endpoint `POST /api/admin/bootstrap-demo` (retired in PMB-62).
+- runtime admin DDL endpoints (`POST /api/admin/run-migrations`, since removed;
+  `POST /api/admin/bootstrap-demo`, still live — retirement tracked in PMB-62).
+
+> **Current status (2026-05-28):** the GitHub Actions path in §2 is wired but
+> **not yet operational** — its `DATABASE_URL_DIRECT` secret is unset (see §3).
+> Until that secret is set, migrations `0001`–`0016` were applied to prod via
+> the temporary PMB-64 runtime endpoint. Setting the secret is what turns §2
+> into the real path.
 
 ---
 
@@ -29,7 +36,7 @@ Write migrations to be idempotent where practical (e.g. `CREATE TABLE IF NOT
 EXISTS`, `GRANT` — which is a no-op when already held). Migration 0016 is
 grant-only and fully idempotent.
 
-## 2. Applying migrations to production (the only supported path)
+## 2. Applying migrations to production (the canonical path)
 
 Migrations run from **GitHub Actions**, not a dev box. The production
 connection string is held only as the repo secret `DATABASE_URL_DIRECT`
@@ -82,17 +89,23 @@ the demo org/users, so its blast radius is the demo org alone.
 
 Re-seed via the **DB seed demo (production)** workflow (manual dispatch,
 requires typing the confirmation input). It runs the same library against
-`DATABASE_URL_DIRECT`. This is a developer/demo convenience, not a production
-data path — production tenants create their own data through the app.
+`DATABASE_URL_DIRECT` — so, like §2, it only works once that secret is set.
+Until then, the live `bootstrap-demo` endpoint is the working reseed path. This
+is a developer/demo convenience, not a production data path — production tenants
+create their own data through the app.
 
-## 5. History: what PMB-62 cleaned up
+## 5. History / current state (PMB-62)
 
 - Migration `0016_grant_tenant_app_membership.sql` (the tenant_app role grants)
-  was first applied at runtime via the admin endpoint before this workflow
-  existed. It is now recorded canonically in `schema_migrations` by the migrate
-  workflow, and its grant scope was security-reviewed (see the PMB-62
-  `security-review` document).
-- `POST /api/admin/bootstrap-demo` + `ADMIN_BOOTSTRAP_TOKEN` were removed once
-  this workflow path existed.
+  was applied **and** recorded in `schema_migrations` on prod via the temporary
+  `POST /api/admin/run-migrations` endpoint in PMB-64 (that endpoint has since
+  been removed). It was **not** applied via the GitHub Actions workflow, which
+  is still waiting on its secret (§3). Its grant scope was security-reviewed —
+  see the PMB-62 `security-review` document.
+- `POST /api/admin/bootstrap-demo` + `ADMIN_BOOTSTRAP_TOKEN` are **still live**.
+  Retirement is tracked in PMB-62, gated on the PMB-60 demo sign-off (the demo
+  still reseeds through this endpoint) plus the SecurityEngineer review.
+  `ADMIN_BOOTSTRAP_TOKEN` was rotated during PMB-64; remove it from Vercel when
+  the endpoint is retired.
 
 Related: `docs/runbooks/postgres-restore.md`.
