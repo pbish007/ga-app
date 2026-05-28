@@ -1,11 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb } from "../src/test/pglite.js";
+import { setupTestSuite, type TestDb } from "../src/index.js";
 
 describe("0003_create_documents migration (PMB-20)", () => {
+  let db: TestDb;
+
+  beforeAll(async () => {
+    ({ db } = await setupTestSuite());
+  });
+
   it("creates a documents table with the J2.1 columns", async () => {
-    const db = await setupTestDb();
     const result = await db.execute<{
       column_name: string;
       data_type: string;
@@ -36,7 +41,6 @@ describe("0003_create_documents migration (PMB-20)", () => {
   });
 
   it("forces row level security on documents (fail closed for non-superusers)", async () => {
-    const db = await setupTestDb();
     const result = await db.execute<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>(sql`
       select relrowsecurity, relforcerowsecurity
         from pg_class where relname = 'documents'
@@ -46,7 +50,6 @@ describe("0003_create_documents migration (PMB-20)", () => {
   });
 
   it("has a unique index on object_key", async () => {
-    const db = await setupTestDb();
     const result = await db.execute<{ indexname: string; indexdef: string }>(sql`
       select indexname, indexdef from pg_indexes
        where tablename = 'documents' and indexname = 'documents_object_key_unique'

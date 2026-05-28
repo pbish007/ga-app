@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import { runAsTenant } from "../src/test/tenant.js";
 
@@ -68,8 +68,18 @@ async function insertEngine(
 }
 
 describe("B2.1 components schema (PMB-11)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+
+  afterEach(async () => {
+    await reset();
+  });
+
   it("rejects an unknown component kind", async () => {
-    const db = await setupTestDb();
     const tenant = await seedTenant(db, "Tenant A", "N11111");
     await expect(
       db.execute(sql`
@@ -80,7 +90,6 @@ describe("B2.1 components schema (PMB-11)", () => {
   });
 
   it("enforces per-(tenant, kind, serial) uniqueness case-insensitively", async () => {
-    const db = await setupTestDb();
     const tenant = await seedTenant(db, "Tenant A", "N11111");
     await insertEngine(db, { tenantId: tenant.orgId, serial: "L-12345" });
     await expect(
@@ -89,7 +98,6 @@ describe("B2.1 components schema (PMB-11)", () => {
   });
 
   it("allows the same serial across different kinds and different tenants", async () => {
-    const db = await setupTestDb();
     const a = await seedTenant(db, "Tenant A", "N11111");
     const b = await seedTenant(db, "Tenant B", "N22222");
 
@@ -109,7 +117,6 @@ describe("B2.1 components schema (PMB-11)", () => {
   });
 
   it("rejects non-positive TBO / cycle values", async () => {
-    const db = await setupTestDb();
     const tenant = await seedTenant(db, "Tenant A", "N11111");
     await expect(
       db.execute(sql`
@@ -126,7 +133,6 @@ describe("B2.1 components schema (PMB-11)", () => {
   });
 
   it("isolates components by tenant under runAsTenant", async () => {
-    const db = await setupTestDb();
     const a = await seedTenant(db, "Tenant A", "N11111");
     const b = await seedTenant(db, "Tenant B", "N22222");
     await insertEngine(db, { tenantId: a.orgId, serial: "ENGINE-A" });
@@ -142,8 +148,18 @@ describe("B2.1 components schema (PMB-11)", () => {
 });
 
 describe("B2.1 component_installations schema (PMB-11)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+
+  afterEach(async () => {
+    await reset();
+  });
+
   it("enforces removed_at / removed_at_tt consistency", async () => {
-    const db = await setupTestDb();
     const tenant = await seedTenant(db, "Tenant A", "N11111");
     const engine = await insertEngine(db, {
       tenantId: tenant.orgId,
@@ -177,7 +193,6 @@ describe("B2.1 component_installations schema (PMB-11)", () => {
   });
 
   it("rejects removed_at earlier than installed_at", async () => {
-    const db = await setupTestDb();
     const tenant = await seedTenant(db, "Tenant A", "N11111");
     const engine = await insertEngine(db, {
       tenantId: tenant.orgId,
@@ -198,7 +213,6 @@ describe("B2.1 component_installations schema (PMB-11)", () => {
   });
 
   it("rejects removed_at_tt less than installed_at_tt", async () => {
-    const db = await setupTestDb();
     const tenant = await seedTenant(db, "Tenant A", "N11111");
     const engine = await insertEngine(db, {
       tenantId: tenant.orgId,
@@ -219,7 +233,6 @@ describe("B2.1 component_installations schema (PMB-11)", () => {
   });
 
   it("forbids two active installations for the same component (partial unique)", async () => {
-    const db = await setupTestDb();
     const a = await seedTenant(db, "Tenant A", "N11111");
     // Second aircraft in the same tenant so the FK + RLS still apply.
     const ac2 = await db.execute<{ id: string }>(sql`
@@ -258,7 +271,6 @@ describe("B2.1 component_installations schema (PMB-11)", () => {
   });
 
   it("isolates installations by tenant under runAsTenant", async () => {
-    const db = await setupTestDb();
     const a = await seedTenant(db, "Tenant A", "N11111");
     const b = await seedTenant(db, "Tenant B", "N22222");
     const engineA = await insertEngine(db, {

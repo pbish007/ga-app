@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import { runAsTenant } from "../src/test/tenant.js";
 
@@ -67,8 +67,18 @@ async function insertAircraft(
 }
 
 describe("B1.1 aircraft schema — regime seam + tenant uniqueness (PMB-11)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+
+  afterEach(async () => {
+    await reset();
+  });
+
   it("requires regime_id (NOT NULL FK) — K2 seam", async () => {
-    const db = await setupTestDb();
     const { a } = await seedTwoTenants(db);
 
     await expect(
@@ -84,7 +94,6 @@ describe("B1.1 aircraft schema — regime seam + tenant uniqueness (PMB-11)", ()
   });
 
   it("rejects a regime_id that does not exist in regimes", async () => {
-    const db = await setupTestDb();
     const { a } = await seedTwoTenants(db);
     const fakeRegime = "00000000-0000-0000-0000-000000000000";
     await expect(
@@ -100,7 +109,6 @@ describe("B1.1 aircraft schema — regime seam + tenant uniqueness (PMB-11)", ()
   });
 
   it("rejects deleting a regime that an aircraft references (ON DELETE RESTRICT)", async () => {
-    const db = await setupTestDb();
     const { a } = await seedTwoTenants(db);
     await insertAircraft(db, {
       tenantId: a.orgId,
@@ -114,7 +122,6 @@ describe("B1.1 aircraft schema — regime seam + tenant uniqueness (PMB-11)", ()
   });
 
   it("enforces N-number uniqueness per tenant (case-insensitive)", async () => {
-    const db = await setupTestDb();
     const { a } = await seedTwoTenants(db);
     await insertAircraft(db, {
       tenantId: a.orgId,
@@ -132,7 +139,6 @@ describe("B1.1 aircraft schema — regime seam + tenant uniqueness (PMB-11)", ()
   });
 
   it("allows the same N-number across different tenants", async () => {
-    const db = await setupTestDb();
     const { a, b } = await seedTwoTenants(db);
 
     await insertAircraft(db, {
@@ -153,7 +159,6 @@ describe("B1.1 aircraft schema — regime seam + tenant uniqueness (PMB-11)", ()
   });
 
   it("rejects an invalid time_source value", async () => {
-    const db = await setupTestDb();
     const { a } = await seedTwoTenants(db);
     await expect(
       insertAircraft(db, {
@@ -166,7 +171,6 @@ describe("B1.1 aircraft schema — regime seam + tenant uniqueness (PMB-11)", ()
   });
 
   it("isolates aircraft rows by tenant under runAsTenant", async () => {
-    const db = await setupTestDb();
     const { a, b } = await seedTwoTenants(db);
 
     await insertAircraft(db, {
@@ -196,7 +200,6 @@ describe("B1.1 aircraft schema — regime seam + tenant uniqueness (PMB-11)", ()
   });
 
   it("blocks cross-tenant aircraft writes via WITH CHECK", async () => {
-    const db = await setupTestDb();
     const { a, b } = await seedTwoTenants(db);
 
     await expect(
@@ -214,7 +217,6 @@ describe("B1.1 aircraft schema — regime seam + tenant uniqueness (PMB-11)", ()
   });
 
   it("rejects negative airframe_total_time", async () => {
-    const db = await setupTestDb();
     const { a } = await seedTwoTenants(db);
     await expect(
       db.execute(sql`
@@ -229,7 +231,6 @@ describe("B1.1 aircraft schema — regime seam + tenant uniqueness (PMB-11)", ()
   });
 
   it("cascades aircraft deletion when the owning tenant is removed", async () => {
-    const db = await setupTestDb();
     const { a } = await seedTwoTenants(db);
     await insertAircraft(db, {
       tenantId: a.orgId,

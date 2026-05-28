@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import {
   TENANT_APP_ROLE,
@@ -101,8 +101,18 @@ async function countAs(
 }
 
 describe("A1.2 tenant RLS — accounts tables (PMB-31)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+  });
+
+  afterEach(async () => {
+    await reset();
+  });
+
   it("scopes reads to the active tenant under tenant_app role", async () => {
-    const db = await setupTestDb();
     const { a, b } = await seedTwoTenants(db);
 
     await runAsTenant(db, a.orgId, async (tx) => {
@@ -129,7 +139,6 @@ describe("A1.2 tenant RLS — accounts tables (PMB-31)", () => {
   });
 
   it("blocks cross-tenant writes via WITH CHECK", async () => {
-    const db = await setupTestDb();
     const { a, b } = await seedTwoTenants(db);
 
     // Tenant A tries to insert an invitation for Tenant B.
@@ -169,7 +178,6 @@ describe("A1.2 tenant RLS — accounts tables (PMB-31)", () => {
   });
 
   it("returns zero rows when no tenant context is set under tenant_app", async () => {
-    const db = await setupTestDb();
     await seedTwoTenants(db);
 
     // Switch to tenant_app at the session level, but leave the GUC unset
@@ -190,7 +198,6 @@ describe("A1.2 tenant RLS — accounts tables (PMB-31)", () => {
     // hiding behind the superuser bypass. If this fails, the seed is wrong
     // (no data); if the gated tests pass and this also restricts visibility,
     // the policy isn't being exercised at all.
-    const db = await setupTestDb();
     await seedTwoTenants(db);
 
     expect(await countAs(db, "organization_memberships")).toBe(2);
@@ -199,7 +206,6 @@ describe("A1.2 tenant RLS — accounts tables (PMB-31)", () => {
   });
 
   it("isolates documents via runAsTenant (J2.1 deferred-policy gap closed)", async () => {
-    const db = await setupTestDb();
     const { a, b } = await seedTwoTenants(db);
 
     // Seed one document per tenant. object_key has the CHECK constraint
@@ -233,7 +239,6 @@ describe("A1.2 tenant RLS — accounts tables (PMB-31)", () => {
   });
 
   it("LOCAL settings inside runAsTenant do not leak after the transaction", async () => {
-    const db = await setupTestDb();
     const { a } = await seedTwoTenants(db);
 
     await runAsTenant(db, a.orgId, async (tx) => {
@@ -256,7 +261,6 @@ describe("A1.2 tenant RLS — accounts tables (PMB-31)", () => {
   });
 
   it("rolls back LOCAL settings on a thrown error", async () => {
-    const db = await setupTestDb();
     const { a } = await seedTwoTenants(db);
 
     await expect(
@@ -277,7 +281,6 @@ describe("A1.2 tenant RLS — accounts tables (PMB-31)", () => {
     // Sanity check: the lower-level session-scoped helpers continue to
     // work alongside runAsTenant. Other packages may pre-date the
     // transaction-wrapping helper.
-    const db = await setupTestDb();
     const { b } = await seedTwoTenants(db);
 
     await db.$client.exec(`set role ${TENANT_APP_ROLE};`);

@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 
-import { setupTestDb, type TestDb } from "@ga/db";
+import { setupTestSuite, type TestDb } from "@ga/db";
 
 import {
   TENANT_CONTEXT_GUC,
@@ -25,19 +25,13 @@ const TENANT_B = "00000000-0000-0000-0000-0000000000b2";
  *   2. `current_setting(..., true)` — the `true` makes a missing GUC
  *      return NULL, so an unset context never matches a tenant_id and
  *      the policy fails closed.
+ *
+ * The DDL runs once per suite ({@link createWidgetsTable} in `beforeAll`);
+ * `resetTestDb` truncates the rows between tests, so each test re-seeds via
+ * {@link seedWidgets}. The fixture table is not a migration catalog table, so
+ * `reset` discovers and truncates it like any other data table.
  */
-async function installTenantWidgetsFixture(db: TestDb) {
-  // Postgres superusers bypass RLS regardless of FORCE ROW LEVEL SECURITY.
-  // pglite defaults the connection role to a superuser, so to actually
-  // exercise the policy we grant a non-superuser role (`tenant_app`,
-  // created by migration 0004), seed data as superuser, then SET ROLE
-  // to that role for the rest of the session. The convention is the
-  // same one production app code will follow: never run user-facing
-  // queries as a Postgres superuser.
-  //
-  // Multi-statement DDL uses the underlying pglite `exec` (simple query
-  // protocol). Drizzle's `execute` runs a prepared statement and rejects
-  // multi-statement payloads.
+async function createWidgetsTable(db: TestDb) {
   await db.$client.exec(`
     create table tenant_widgets (
       id uuid primary key default gen_random_uuid(),
@@ -49,11 +43,22 @@ async function installTenantWidgetsFixture(db: TestDb) {
     create policy tenant_widgets_isolation on tenant_widgets
       using (tenant_id::text = current_setting('${TENANT_CONTEXT_GUC}', true))
       with check (tenant_id::text = current_setting('${TENANT_CONTEXT_GUC}', true));
+    grant select, insert, update, delete on tenant_widgets to tenant_app;
+  `);
+}
+
+/**
+ * Seed the widget rows and switch the session to the non-superuser
+ * `tenant_app` role so the RLS policy is actually exercised — pglite runs
+ * the connection as a superuser by default, which bypasses RLS. `reset`
+ * (afterEach) drops the role back and truncates these rows.
+ */
+async function seedWidgets(db: TestDb) {
+  await db.$client.exec(`
     insert into tenant_widgets (tenant_id, label) values
       ('${TENANT_A}', 'a-1'),
       ('${TENANT_A}', 'a-2'),
       ('${TENANT_B}', 'b-1');
-    grant select, insert, update, delete on tenant_widgets to tenant_app;
     set role tenant_app;
   `);
 }
@@ -69,9 +74,20 @@ async function selectLabels(
 }
 
 describe("J3.2 tenant-isolation harness (PMB-9)", () => {
+  let db: TestDb;
+  let reset: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, reset } = await setupTestSuite());
+    await createWidgetsTable(db);
+  });
+
+  afterEach(async () => {
+    await reset();
+  });
+
   it("scopes reads to the active tenant when context is set", async () => {
-    const db = await setupTestDb();
-    await installTenantWidgetsFixture(db);
+    await seedWidgets(db);
 
     const seenByA = await withTenantContext(db, TENANT_A, () =>
       selectLabels(db),
@@ -85,16 +101,14 @@ describe("J3.2 tenant-isolation harness (PMB-9)", () => {
   });
 
   it("returns zero rows when no tenant context is set (fail closed)", async () => {
-    const db = await setupTestDb();
-    await installTenantWidgetsFixture(db);
+    await seedWidgets(db);
     await clearTenantContext(db);
 
     expect(await selectLabels(db)).toEqual([]);
   });
 
   it("blocks cross-tenant reads even with explicit tenant_id predicates", async () => {
-    const db = await setupTestDb();
-    await installTenantWidgetsFixture(db);
+    await seedWidgets(db);
 
     await withTenantContext(db, TENANT_A, async () => {
       expect(
@@ -105,8 +119,7 @@ describe("J3.2 tenant-isolation harness (PMB-9)", () => {
   });
 
   it("blocks cross-tenant writes (insert/update/delete bound by USING)", async () => {
-    const db = await setupTestDb();
-    await installTenantWidgetsFixture(db);
+    await seedWidgets(db);
 
     await withTenantContext(db, TENANT_A, async () => {
       const updated = await db.execute<{ id: string }>(
@@ -135,8 +148,6 @@ describe("J3.2 tenant-isolation harness (PMB-9)", () => {
   });
 
   it("set/clear is observable through current_setting()", async () => {
-    const db = await setupTestDb();
-
     await setTenantContext(db, TENANT_A);
     const set = await db.execute<{ tenant: string | null }>(
       sql`select current_setting(${TENANT_CONTEXT_GUC}, true) as tenant`,
@@ -151,8 +162,7 @@ describe("J3.2 tenant-isolation harness (PMB-9)", () => {
   });
 
   it("restores context on thrown errors inside withTenantContext", async () => {
-    const db = await setupTestDb();
-    await installTenantWidgetsFixture(db);
+    await seedWidgets(db);
 
     await expect(
       withTenantContext(db, TENANT_A, async () => {

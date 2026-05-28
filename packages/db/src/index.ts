@@ -104,7 +104,12 @@ export type {
   NotificationPreferences,
 } from "./schema/notifications.js";
 export { NOTIFICATION_LEVELS } from "./schema/notifications.js";
-export { setupTestDb, type TestDb } from "./test/pglite.js";
+export {
+  setupTestDb,
+  setupTestSuite,
+  type TestDb,
+  type TestSuite,
+} from "./test/pglite.js";
 export {
   TENANT_APP_ROLE,
   TENANT_CONTEXT_GUC,
