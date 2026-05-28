@@ -1,0 +1,50 @@
+name: DB seed demo (production)
+
+# Manual, guarded reseed of the board-acceptance demo org ("Blue Sky Aviation
+# (Demo)", PMB-60). Replaces the seed half of the retired
+# POST /api/admin/bootstrap-demo endpoint (PMB-62).
+#
+# Blast radius is the demo org + its three demo users only: the seed library
+# deletes and recreates exactly those rows and nothing else. It is NOT a
+# production data path — real tenants create their own data through the app.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type RESEED-DEMO to confirm wiping + reseeding the demo org'
+        required: true
+        default: ''
+
+concurrency:
+  group: db-seed-demo-prod
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    if: ${{ inputs.confirm == 'RESEED-DEMO' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Seed demo org
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.DATABASE_URL_DIRECT }}
+        run: |
+          if [ -z "${DATABASE_URL_DIRECT}" ]; then
+            echo "::error::DATABASE_URL_DIRECT secret is not set on this repo." >&2
+            exit 1
+          fi
+          node apps/web/scripts/seed-demo.mjs

@@ -1,0 +1,41 @@
+name: DB migrate (production)
+
+# Canonical path for applying SQL migrations to the production Postgres.
+#
+# Runs packages/db/scripts/migrate.sh against the Neon DIRECT (non-pooled)
+# endpoint. The script is idempotent: it tracks applied filenames in
+# schema_migrations and re-runs are no-ops, so a dispatch with nothing new
+# pending is safe.
+#
+# The connection string lives only in GitHub Actions secrets
+# (DATABASE_URL_DIRECT) — never in a comment or the repo. This replaces the
+# ad-hoc "paste a Neon key in an issue" workflow and the runtime admin DDL
+# endpoint (POST /api/admin/bootstrap-demo, retired in PMB-62).
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: db-migrate-prod
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # ubuntu-latest ships a postgresql-client (psql >= 14); no install step.
+      - name: Confirm psql is available
+        run: psql --version
+
+      - name: Apply pending migrations
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.DATABASE_URL_DIRECT }}
+        run: |
+          if [ -z "${DATABASE_URL_DIRECT}" ]; then
+            echo "::error::DATABASE_URL_DIRECT secret is not set on this repo." >&2
+            echo "Set it under Settings -> Secrets and variables -> Actions." >&2
+            exit 1
+          fi
+          bash packages/db/scripts/migrate.sh
