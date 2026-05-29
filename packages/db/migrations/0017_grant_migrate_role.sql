@@ -24,12 +24,25 @@
 -- DATABASE_URL_DIRECT GitHub secret at `neondb_owner` (the role the runtime
 -- already uses); see PMB-70 for the follow-up.
 
--- Lets authenticator run `CREATE TABLE IF NOT EXISTS schema_migrations` (the
--- CREATE acl is checked even when the table already exists) and create the
--- tables of future migrations. USAGE is already held; re-granting is a no-op.
-GRANT USAGE, CREATE ON SCHEMA public TO authenticator;
+-- `authenticator` is a Neon platform role; it exists on prod but NOT in the
+-- pglite harness that replays every migration in `packages/db/tests`. An
+-- unconditional GRANT to it aborts the whole migration with
+--   ERROR 42704: role "authenticator" does not exist
+-- which reds every db-backed suite (and CI). Guard on role existence —
+-- mirroring 0004's CREATE ROLE IF NOT EXISTS idempotency — so prod applies
+-- the grants and the test harness skips them. No behavior change on prod.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'authenticator') THEN
+    -- Lets authenticator run `CREATE TABLE IF NOT EXISTS schema_migrations`
+    -- (the CREATE acl is checked even when the table already exists) and create
+    -- the tables of future migrations. USAGE is already held; re-grant is a no-op.
+    GRANT USAGE, CREATE ON SCHEMA public TO authenticator;
 
--- Lets authenticator read the applied-ledger (to skip already-applied files)
--- and record newly applied files. schema_migrations is owned by neondb_owner,
--- so the connecting owner role can grant these.
-GRANT SELECT, INSERT ON schema_migrations TO authenticator;
+    -- Lets authenticator read the applied-ledger (to skip already-applied
+    -- files) and record newly applied files. schema_migrations is owned by
+    -- neondb_owner, so the connecting owner role can grant these.
+    GRANT SELECT, INSERT ON schema_migrations TO authenticator;
+  END IF;
+END
+$$;
