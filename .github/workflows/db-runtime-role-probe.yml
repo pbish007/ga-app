@@ -1,0 +1,131 @@
+name: DB runtime-role probe (production)
+
+# TEMPORARY read-only diagnostic for PMB-75 (precondition for PMB-74). Connects
+# with the same DATABASE_URL_DIRECT GitHub secret the migrate workflow uses
+# (authenticates as `authenticator`, which can read system catalogs) and reports:
+#   1. members of `tenant_app` that can log in (candidate runtime role(s));
+#   2. role attributes (rolsuper, rolbypassrls, ...) of all suspect roles;
+#   3. RLS state + policies on `organization_memberships` (the auth path reads
+#      this table on the bare runtime connection, outside any tenant tx);
+#   4. an attempt to read `organization_memberships` with no tenant GUC set.
+#
+# Read-only SELECTs only. No writes, no DDL. Delete this workflow once the
+# verification is complete (mirrors b2ae66a / 3e98f5b for PMB-70).
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: db-migrate-prod
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm psql is available
+        run: psql --version
+
+      - name: Probe runtime role + RLS state
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.DATABASE_URL_DIRECT }}
+        run: |
+          psql --no-psqlrc "$DATABASE_URL_DIRECT" <<'SQL'
+          \set ON_ERROR_STOP off
+          \echo '== 0. identity of this probe connection =='
+          SELECT current_user, session_user, current_database();
+
+          \echo '== 1. members of tenant_app that can log in (candidate runtime roles) =='
+          SELECT child.rolname,
+                 child.rolcanlogin,
+                 child.rolsuper,
+                 child.rolbypassrls,
+                 child.rolinherit
+          FROM pg_auth_members m
+          JOIN pg_roles parent ON parent.oid = m.roleid
+          JOIN pg_roles child  ON child.oid  = m.member
+          WHERE parent.rolname = 'tenant_app'
+          ORDER BY child.rolname;
+
+          \echo '== 2. attributes of suspect roles =='
+          SELECT rolname, rolsuper, rolbypassrls, rolcanlogin, rolinherit,
+                 rolcreatedb, rolcreaterole
+          FROM pg_roles
+          WHERE rolname IN (
+            'neondb_owner','authenticator','authenticated','anonymous',
+            'tenant_app','tenant_runtime','pg_database_owner'
+          )
+          ORDER BY rolname;
+
+          \echo '== 3a. roles current_user (authenticator) is a member of =='
+          SELECT r.rolname AS member_of
+          FROM pg_auth_members m
+          JOIN pg_roles r ON r.oid = m.roleid
+          JOIN pg_roles u ON u.oid = m.member
+          WHERE u.rolname = current_user
+          ORDER BY r.rolname;
+
+          \echo '== 3b. owner of database + public schema =='
+          SELECT d.datname, pg_get_userbyid(d.datdba) AS db_owner
+          FROM pg_database d WHERE d.datname = current_database();
+          SELECT n.nspname, pg_get_userbyid(n.nspowner) AS schema_owner
+          FROM pg_namespace n WHERE n.nspname = 'public';
+
+          \echo '== 4. organization_memberships: owner, RLS enabled, RLS forced =='
+          SELECT c.relname,
+                 pg_get_userbyid(c.relowner) AS owner,
+                 c.relrowsecurity AS rls_enabled,
+                 c.relforcerowsecurity AS rls_forced
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public'
+            AND c.relname = 'organization_memberships';
+
+          \echo '== 5. policies on organization_memberships =='
+          SELECT polname,
+                 polcmd,
+                 polpermissive,
+                 pg_get_expr(polqual, polrelid)      AS using_expr,
+                 pg_get_expr(polwithcheck, polrelid) AS with_check_expr,
+                 (SELECT array_agg(rolname ORDER BY rolname)
+                    FROM pg_roles r
+                   WHERE r.oid = ANY(polroles))      AS applies_to_roles
+          FROM pg_policy p
+          JOIN pg_class c ON c.oid = p.polrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public'
+            AND c.relname = 'organization_memberships'
+          ORDER BY polname;
+
+          \echo '== 6. behavioral: read organization_memberships with NO tenant GUC =='
+          \echo '       (as current_user = authenticator; non-bypass + FORCE RLS + no GUC => 0 rows or error)'
+          SELECT count(*) AS rows_no_guc_as_authenticator FROM public.organization_memberships;
+
+          \echo '== 7. behavioral: try SET ROLE to each tenant_app member, count rows, RESET =='
+          \echo '       authenticator likely cannot SET ROLE neondb_owner; capture whichever errors occur.'
+          DO $$
+          DECLARE
+            r RECORD;
+            cnt BIGINT;
+          BEGIN
+            FOR r IN
+              SELECT child.rolname
+              FROM pg_auth_members m
+              JOIN pg_roles parent ON parent.oid = m.roleid
+              JOIN pg_roles child  ON child.oid  = m.member
+              WHERE parent.rolname = 'tenant_app'
+                AND child.rolcanlogin
+              ORDER BY child.rolname
+            LOOP
+              BEGIN
+                EXECUTE format('SET LOCAL ROLE %I', r.rolname);
+                EXECUTE 'SELECT count(*) FROM public.organization_memberships' INTO cnt;
+                RAISE NOTICE 'role=% rows_no_guc=%', r.rolname, cnt;
+              EXCEPTION WHEN OTHERS THEN
+                RAISE NOTICE 'role=% error=% (%)', r.rolname, SQLERRM, SQLSTATE;
+              END;
+              EXECUTE 'RESET ROLE';
+            END LOOP;
+          END
+          $$;
+          SQL
