@@ -27,11 +27,12 @@ import { TENANT_APP_ROLE, TENANT_CONTEXT_GUC } from "../src/test/tenant.js";
  * tenant_app's grants and fall back to the FORCE-RLS behavior we're trying to
  * stop depending on.
  *
- * This suite proves the property against a tenant table that mirrors the
- * production shape (FORCE RLS + `app_isolation` policy + tenant_app grant).
+ * This suite proves the property against the REAL `tenant_runtime` role that
+ * migration 0018 provisions, and a tenant table mirroring the production shape
+ * (FORCE RLS + `app_isolation` policy + tenant_app grant).
  */
 
-const RUNTIME_ROLE = "tenant_runtime_test";
+const RUNTIME_ROLE = "tenant_runtime";
 const TENANT_A = "00000000-0000-0000-0000-0000000000a1";
 const TENANT_B = "00000000-0000-0000-0000-0000000000b2";
 
@@ -59,32 +60,13 @@ async function createTenantTable(db: TestDb): Promise<void> {
   `);
 }
 
-async function createRuntimeRole(db: TestDb): Promise<void> {
-  // Mirror the production login role exactly. NOINHERIT is the point: it is a
-  // member of tenant_app (so it may SET ROLE to it) but does not silently
-  // inherit tenant_app's privileges. NOSUPERUSER NOBYPASSRLS keep RLS binding.
-  // It gets schema USAGE (it must resolve table names + SET ROLE) but NO table
-  // privileges of its own, so a missed role switch is a hard permission error.
-  await db.$client.exec(`
-    do $$
-    begin
-      if not exists (select 1 from pg_catalog.pg_roles where rolname = '${RUNTIME_ROLE}') then
-        create role ${RUNTIME_ROLE} login noinherit nosuperuser nobypassrls
-          nocreatedb nocreaterole;
-      end if;
-    end
-    $$;
-    grant usage on schema public to ${RUNTIME_ROLE};
-    grant ${TENANT_APP_ROLE} to ${RUNTIME_ROLE};
-  `);
-}
-
 describe("PMB-74 runtime role fails closed at the privilege layer", () => {
   let db: TestDb;
 
   beforeAll(async () => {
+    // `tenant_runtime` is created by migration 0018 (replayed by setupTestSuite),
+    // so this suite verifies the ACTUAL provisioned role, not a synthetic stand-in.
     ({ db } = await setupTestSuite());
-    await createRuntimeRole(db);
     await createTenantTable(db);
   });
 
