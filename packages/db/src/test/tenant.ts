@@ -14,6 +14,20 @@ import type { TestDb } from "./pglite.js";
 export const TENANT_CONTEXT_GUC = "app.current_tenant_id";
 
 /**
+ * Postgres custom GUC that the `app_self_membership` policy on
+ * `organization_memberships` reads (migration 0019). The identity path
+ * sets it from the trusted session so a tenant_app transaction with no
+ * tenant context can still read (and self-insert) the authenticated user's
+ * own membership rows — exactly what the `/orgs` cross-tenant org list and
+ * the signup self-insert need. Fail-closed when unset (NULL never matches).
+ *
+ * PMB-74 introduces this so `DATABASE_URL` can repoint at a NOBYPASSRLS
+ * `tenant_runtime` role without breaking the identity-path reads/writes
+ * that today work via `neondb_owner`'s `rolbypassrls`.
+ */
+export const USER_CONTEXT_GUC = "app.current_user_id";
+
+/**
  * Postgres role that every application connection MUST switch to before
  * issuing user-facing queries. Defined in migration 0004 as
  * NOSUPERUSER NOBYPASSRLS so that even a query that forgets to set the

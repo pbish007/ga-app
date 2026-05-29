@@ -113,6 +113,7 @@ export {
 export {
   TENANT_APP_ROLE,
   TENANT_CONTEXT_GUC,
+  USER_CONTEXT_GUC,
   clearTenantContext,
   runAsTenant,
   setTenantContext,
