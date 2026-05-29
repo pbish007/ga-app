@@ -12,7 +12,11 @@ import { schema, type OrgType } from "@ga/db";
 import { loadSession, SESSION_COOKIE_NAME, type SessionRecord } from "./auth/session";
 import { buildLoadMembership } from "./auth/withRequest";
 import { getDb } from "./db";
-import { runAsTenantOnProductionDb, type RequestTenantTx } from "./tenant-tx";
+import {
+  runAsIdentityOnProductionDb,
+  runAsTenantOnProductionDb,
+  type RequestTenantTx,
+} from "./tenant-tx";
 
 const { organizationMemberships, organizations } = schema;
 
@@ -67,35 +71,44 @@ export interface UserOrganization {
 }
 
 /**
- * Every organization the user is a member of, with their role. Reads
- * the membership × organization join on the application connection
- * (same path as the login membership check) — the `/orgs` index uses
- * this to route a user into their org without a typed tenant id.
+ * Every organization the user is a member of, with their role. Reads the
+ * membership × organization join inside an *identity* transaction
+ * (tenant_app + `app.current_user_id` set LOCAL). The `app_self_membership`
+ * policy (migration 0019) restricts visibility to the authenticated user's
+ * own rows — exactly what `/orgs` needs to route a user into their org
+ * without a typed tenant id.
+ *
+ * Why the role switch: under the non-bypass `tenant_runtime` connection
+ * (PMB-74), reading `organization_memberships` directly on the connection
+ * would fail (no grant) or return zero rows (FORCE-RLS, no GUC). The
+ * identity tx + policy is the secure-by-default path.
  */
 export async function listUserOrganizations(
   userId: string,
 ): Promise<UserOrganization[]> {
   const db = getDb();
-  const rows = await db
-    .select({
-      tenantId: organizationMemberships.tenantId,
-      role: organizationMemberships.role,
-      name: organizations.name,
-      orgType: organizations.orgType,
-    })
-    .from(organizationMemberships)
-    .innerJoin(
-      organizations,
-      eq(organizations.id, organizationMemberships.tenantId),
-    )
-    .where(eq(organizationMemberships.userId, userId))
-    .orderBy(organizations.name);
-  return rows.map((r) => ({
-    tenantId: r.tenantId,
-    name: r.name,
-    orgType: r.orgType,
-    role: r.role,
-  }));
+  return runAsIdentityOnProductionDb(db, userId, async (tx) => {
+    const rows = await tx
+      .select({
+        tenantId: organizationMemberships.tenantId,
+        role: organizationMemberships.role,
+        name: organizations.name,
+        orgType: organizations.orgType,
+      })
+      .from(organizationMemberships)
+      .innerJoin(
+        organizations,
+        eq(organizations.id, organizationMemberships.tenantId),
+      )
+      .where(eq(organizationMemberships.userId, userId))
+      .orderBy(organizations.name);
+    return rows.map((r) => ({
+      tenantId: r.tenantId,
+      name: r.name,
+      orgType: r.orgType,
+      role: r.role,
+    }));
+  });
 }
 
 export interface OrgNavContext {
@@ -122,24 +135,33 @@ export async function loadOrgNavContext(
   const session = await loadPageSession();
   if (!session) return { ok: false, reason: "no-session" };
   const db = getDb();
-  const [row] = await db
-    .select({
-      role: organizationMemberships.role,
-      name: organizations.name,
-      orgType: organizations.orgType,
-    })
-    .from(organizationMemberships)
-    .innerJoin(
-      organizations,
-      eq(organizations.id, organizationMemberships.tenantId),
-    )
-    .where(
-      and(
-        eq(organizationMemberships.userId, session.user.id),
-        eq(organizationMemberships.tenantId, tenantId),
-      ),
-    )
-    .limit(1);
+  // Membership × organization join runs as tenant_app inside the tenant tx —
+  // app_isolation gates the membership row, and tenant_app holds SELECT on
+  // organizations (granted in migration 0019). Under the non-bypass
+  // tenant_runtime connection this is the only path that returns rows; on the
+  // legacy bypass-class connection it's equally safe (a tighter envelope, no
+  // visibility change).
+  const row = await runAsTenantOnProductionDb(db, tenantId, async (tx) => {
+    const [r] = await tx
+      .select({
+        role: organizationMemberships.role,
+        name: organizations.name,
+        orgType: organizations.orgType,
+      })
+      .from(organizationMemberships)
+      .innerJoin(
+        organizations,
+        eq(organizations.id, organizationMemberships.tenantId),
+      )
+      .where(
+        and(
+          eq(organizationMemberships.userId, session.user.id),
+          eq(organizationMemberships.tenantId, tenantId),
+        ),
+      )
+      .limit(1);
+    return r ?? null;
+  });
   if (!row) return { ok: false, reason: "not-member" };
   return {
     ok: true,

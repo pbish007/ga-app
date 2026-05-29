@@ -13,11 +13,14 @@
  * Variables) before the schedule fires. Without it the route refuses
  * to run, which is the correct default in any environment.
  *
- * The route is intentionally NOT tenant-scoped: it runs as the
- * project's regular DATABASE_URL connection (the migrator/system
- * connection) so it can read users + organization_memberships across
- * all tenants and write notifications + email_outbox without RLS
- * gating it. The sweep itself filters by tenant_id in every query.
+ * The route is intentionally NOT tenant-scoped: it runs as the project's
+ * *system/owner* connection (`DATABASE_URL_DIRECT` → `neondb_owner`) so it
+ * can read users + organization_memberships across all tenants and write
+ * notifications + email_outbox without RLS gating it. PMB-74 repoints the
+ * runtime `DATABASE_URL` at the non-bypass `tenant_runtime`, which CANNOT
+ * cross tenants without `runAsTenantOnProductionDb` — so the cron uses
+ * `getDirectDb()` (the owner connection) instead of `getDb()`. The sweep
+ * itself filters by tenant_id in every query.
  */
 
 import { NextResponse } from "next/server";
@@ -31,7 +34,7 @@ import {
   type SweepDb,
 } from "@ga/notifications";
 
-import { getDb } from "../../../../lib/db";
+import { getDirectDb } from "../../../../lib/db";
 
 export const dynamic = "force-dynamic";
 // Compliance work — keep on Node runtime so we get the postgres-js driver
@@ -59,7 +62,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const db = getDb() as unknown as SweepDb;
+  const db = getDirectDb() as unknown as SweepDb;
   const sweep = await runNotificationSweep(db);
   const drain = await drainEmailOutbox(db, buildMailer());
 

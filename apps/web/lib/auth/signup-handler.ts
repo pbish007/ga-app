@@ -7,7 +7,9 @@ import {
   passwordHasher,
   type AccountsDb,
 } from "@ga/accounts";
+import type { DocumentsDb } from "@ga/storage";
 
+import { runAsIdentityOnProductionDb } from "../tenant-tx";
 import {
   buildSetCookieHeader,
   createSessionCookieValue,
@@ -134,10 +136,18 @@ export async function handleSignup(
   const orgs = new OrganizationService(deps.db);
   const org = await orgs.create({ name: orgName, orgType });
 
-  await deps.db.insert(organizationMemberships).values({
-    tenantId: org.id,
-    userId: user.id,
-    role: "admin",
+  // The membership INSERT is self-tenant (a user adding themselves to their
+  // brand-new org) — runs as tenant_app with `app.current_user_id = user.id`
+  // so the app_self_membership policy's WITH CHECK passes (matches user_id)
+  // without needing a tenant GUC (we don't have a request-level tenant yet
+  // at signup time). Under the non-bypass `tenant_runtime` connection (PMB-74)
+  // this is the only path that lets a fresh user write their own membership.
+  await runAsIdentityOnProductionDb(deps.db as DocumentsDb, user.id, async (tx) => {
+    await tx.insert(organizationMemberships).values({
+      tenantId: org.id,
+      userId: user.id,
+      role: "admin",
+    });
   });
 
   const iat = Math.floor(now.getTime() / 1000);

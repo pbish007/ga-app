@@ -30,10 +30,17 @@ export async function POST(request: Request): Promise<Response> {
   if (!tokenOk(request)) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  const databaseUrl = process.env.DATABASE_URL;
+  // Demo seed performs cross-tenant inserts (memberships + many tenant tables)
+  // and must run on the owner connection. PMB-74 repoints DATABASE_URL at the
+  // non-bypass tenant_runtime, so prefer DATABASE_URL_DIRECT (still neondb_owner,
+  // the migrate path) and fall back to DATABASE_URL for environments where
+  // the split has not landed yet.
+  const databaseUrl =
+    (process.env.DATABASE_URL_DIRECT ?? "").trim() ||
+    (process.env.DATABASE_URL ?? "").trim();
   if (!databaseUrl) {
     return NextResponse.json(
-      { error: "DATABASE_URL not configured" },
+      { error: "DATABASE_URL_DIRECT (or DATABASE_URL) not configured" },
       { status: 500 },
     );
   }

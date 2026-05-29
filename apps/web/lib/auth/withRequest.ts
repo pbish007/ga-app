@@ -10,7 +10,9 @@ import {
   type Permission,
   type PermissionsMatrix,
 } from "@ga/accounts";
+import type { DocumentsDb } from "@ga/storage";
 
+import { runAsTenantOnProductionDb } from "../tenant-tx";
 import { loadSession, type SessionDeps, type SessionUser } from "./session";
 
 const { organizationMemberships } = schema;
@@ -144,6 +146,12 @@ function defaultResolveTenantId(req: Request): string | null {
  * `organization_memberships` table by (user, tenant) and attaches the
  * permission set via the in-memory matrix.
  *
+ * The read runs inside `runAsTenantOnProductionDb` (tenant_app role +
+ * `app.current_tenant_id` set LOCAL), so RLS is enforced as a database
+ * property — the connection role no longer needs to bypass RLS for this
+ * lookup to succeed. (PMB-74 — required so the runtime DATABASE_URL can
+ * repoint at the non-bypass `tenant_runtime` role.)
+ *
  * Production callers wire this up once per process with the
  * application's db handle + cached matrix; tests construct it inline
  * against the pglite test db.
@@ -156,17 +164,19 @@ export function buildLoadMembership(
   tenantId: string,
 ) => Promise<MembershipWithPermissions | null> {
   return async (userId, tenantId) => {
-    const [m] = await db
-      .select()
-      .from(organizationMemberships)
-      .where(
-        and(
-          eq(organizationMemberships.userId, userId),
-          eq(organizationMemberships.tenantId, tenantId),
-        ),
-      )
-      .limit(1);
-    return m ? attachPermissions(m, matrix) : null;
+    return runAsTenantOnProductionDb(db as DocumentsDb, tenantId, async (tx) => {
+      const [m] = await tx
+        .select()
+        .from(organizationMemberships)
+        .where(
+          and(
+            eq(organizationMemberships.userId, userId),
+            eq(organizationMemberships.tenantId, tenantId),
+          ),
+        )
+        .limit(1);
+      return m ? attachPermissions(m, matrix) : null;
+    });
   };
 }
 

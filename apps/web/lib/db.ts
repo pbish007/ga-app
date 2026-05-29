@@ -13,6 +13,7 @@ import type { DocumentsDb } from "@ga/storage";
  * this path.
  */
 let cached: DocumentsDb | null = null;
+let cachedDirect: DocumentsDb | null = null;
 
 export function getDb(): DocumentsDb {
   if (cached) return cached;
@@ -21,4 +22,31 @@ export function getDb(): DocumentsDb {
   const client = postgres(url, { prepare: false });
   cached = drizzle(client, { schema });
   return cached;
+}
+
+/**
+ * Owner-class ("direct") connection for *system* tasks that legitimately
+ * span tenants and need to bypass RLS — the scheduled notification sweep
+ * (`apps/web/app/api/cron/notifications/route.ts`) and the one-shot
+ * `bootstrap-demo` admin endpoint. These predate the runtime/owner split
+ * and rely on the bare connection seeing rows across every tenant.
+ *
+ * After PMB-74, the runtime `DATABASE_URL` repoints at the non-bypass
+ * `tenant_runtime` role — at which point those cross-tenant system reads
+ * /writes can no longer run on it. They run here instead, on the existing
+ * `DATABASE_URL_DIRECT` connection (still `neondb_owner`, still the migrate
+ * + break-glass identity), which is exactly what its `# Why a separate URL`
+ * docstring in `packages/db/src/env.ts` is for.
+ *
+ * Falls back to `DATABASE_URL` when the direct var is unset (e.g. local
+ * dev where both point at the same Neon role today) so this addition does
+ * not regress existing environments.
+ */
+export function getDirectDb(): DocumentsDb {
+  if (cachedDirect) return cachedDirect;
+  const url = (process.env.DATABASE_URL_DIRECT ?? "").trim() || requireDatabaseUrl();
+  assertSslRequired(url);
+  const client = postgres(url, { prepare: false });
+  cachedDirect = drizzle(client, { schema });
+  return cachedDirect;
 }
