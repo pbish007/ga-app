@@ -11,15 +11,33 @@ importers:
   apps/faa-pipeline:
     dependencies:
       '@aws-sdk/client-s3':
-        specifier: ^3.0.0
+        specifier: ^3.700.0
         version: 3.1061.0
+      adm-zip:
+        specifier: ^0.5.16
+        version: 0.5.17
+      pg:
+        specifier: ^8.13.1
+        version: 8.21.0
     devDependencies:
+      '@types/adm-zip':
+        specifier: ^0.5.7
+        version: 0.5.8
+      '@types/node':
+        specifier: 22.10.5
+        version: 22.10.5
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
       tsx:
-        specifier: ^4.0.0
+        specifier: ^4.19.2
         version: 4.22.4
       typescript:
-        specifier: ^5.0.0
+        specifier: 5.7.2
         version: 5.7.2
+      vitest:
+        specifier: 2.1.8
+        version: 2.1.8(@types/node@22.10.5)
 
   apps/web:
     dependencies:
@@ -43,7 +61,7 @@ importers:
         version: link:../../packages/storage
       drizzle-orm:
         specifier: 0.36.4
-        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/react@19.0.2)(postgres@3.4.5)(react@19.0.0)
+        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/pg@8.20.0)(@types/react@19.0.2)(pg@8.21.0)(postgres@3.4.5)(react@19.0.0)
       next:
         specifier: 15.5.18
         version: 15.5.18(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
@@ -92,7 +110,7 @@ importers:
         version: link:../regime
       drizzle-orm:
         specifier: 0.36.4
-        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/react@19.0.2)(postgres@3.4.5)(react@19.0.0)
+        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/pg@8.20.0)(@types/react@19.0.2)(pg@8.21.0)(postgres@3.4.5)(react@19.0.0)
     devDependencies:
       '@electric-sql/pglite':
         specifier: 0.2.14
@@ -117,7 +135,7 @@ importers:
         version: link:../regime
       drizzle-orm:
         specifier: 0.36.4
-        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/react@19.0.2)(postgres@3.4.5)(react@19.0.0)
+        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/pg@8.20.0)(@types/react@19.0.2)(pg@8.21.0)(postgres@3.4.5)(react@19.0.0)
     devDependencies:
       '@electric-sql/pglite':
         specifier: 0.2.14
@@ -148,7 +166,7 @@ importers:
     dependencies:
       drizzle-orm:
         specifier: 0.36.4
-        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/react@19.0.2)(postgres@3.4.5)(react@19.0.0)
+        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/pg@8.20.0)(@types/react@19.0.2)(pg@8.21.0)(postgres@3.4.5)(react@19.0.0)
     devDependencies:
       '@electric-sql/pglite':
         specifier: 0.2.14
@@ -173,7 +191,7 @@ importers:
         version: link:../db
       drizzle-orm:
         specifier: 0.36.4
-        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/react@19.0.2)(postgres@3.4.5)(react@19.0.0)
+        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/pg@8.20.0)(@types/react@19.0.2)(pg@8.21.0)(postgres@3.4.5)(react@19.0.0)
     devDependencies:
       '@electric-sql/pglite':
         specifier: 0.2.14
@@ -195,7 +213,7 @@ importers:
         version: link:../db
       drizzle-orm:
         specifier: 0.36.4
-        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/react@19.0.2)(postgres@3.4.5)(react@19.0.0)
+        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/pg@8.20.0)(@types/react@19.0.2)(pg@8.21.0)(postgres@3.4.5)(react@19.0.0)
     devDependencies:
       '@electric-sql/pglite':
         specifier: 0.2.14
@@ -220,7 +238,7 @@ importers:
         version: 0.27.0
       drizzle-orm:
         specifier: 0.36.4
-        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/react@19.0.2)(postgres@3.4.5)(react@19.0.0)
+        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/pg@8.20.0)(@types/react@19.0.2)(pg@8.21.0)(postgres@3.4.5)(react@19.0.0)
     devDependencies:
       '@electric-sql/pglite':
         specifier: 0.2.14
@@ -1116,6 +1134,9 @@ packages:
   '@tybys/wasm-util@0.10.2':
     resolution: {integrity: sha512-RoBvJ2X0wuKlWFIjrwffGw1IqZHKQqzIchKaadZZfnNpsAYp2mM0h36JtPCjNDAHGgYez/15uMBpfGwchhiMgg==}
 
+  '@types/adm-zip@0.5.8':
+    resolution: {integrity: sha512-RVVH7QvZYbN+ihqZ4kX/dMiowf6o+Jk1fNwiSdx0NahBJLU787zkULhGhJM8mf/obmLGmgdMM0bXsQTmyfbR7Q==}
+
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
@@ -1130,6 +1151,9 @@ packages:
 
   '@types/node@22.10.5':
     resolution: {integrity: sha512-F8Q+SeGimwOo86fiovQh8qiXfFEh2/ocYv7tU5pJ3EXMSSxk1Joj5wefpFK2fHTf/N6HKGSxIDBT9f3gCxXPkQ==}
+
+  '@types/pg@8.20.0':
+    resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}
 
   '@types/react-dom@19.0.2':
     resolution: {integrity: sha512-c1s+7TKFaDRRxr1TxccIX2u7sfCnc3RxkVyBIUA2lCpyqCF+QoAwQ/CBg7bsMdVwP120HEH143VQezKtef5nCg==}
@@ -1353,6 +1377,10 @@ packages:
     resolution: {integrity: sha512-UVJyE9MttOsBQIDKw1skb9nAwQuR5wuGD3+82K6JgJlm/Y+KI92oNsMNGZCYdDsVtRHSak0pcV5Dno5+4jh9sw==}
     engines: {node: '>=0.4.0'}
     hasBin: true
+
+  adm-zip@0.5.17:
+    resolution: {integrity: sha512-+Ut8d9LLqwEvHHJl1+PIHqoyDxFgVN847JTVM3Izi3xHDWPE4UtzzXysMZQs64DMcrJfBeS/uoEP4AD3HQHnQQ==}
+    engines: {node: '>=12.0'}
 
   ajv@6.15.0:
     resolution: {integrity: sha512-fgFx7Hfoq60ytK2c7DhnF8jIvzYgOMxfugjLOSMHjLIPgenqa7S7oaagATUq99mV6IYvN2tRmC0wnTYX6iPbMw==}
@@ -2304,6 +2332,40 @@ packages:
     resolution: {integrity: sha512-//nshmD55c46FuFw26xV/xFAaB5HF9Xdap7HJBBnrKdAd6/GxDBaNA1870O79+9ueg61cZLSVc+OaFlfmObYVQ==}
     engines: {node: '>= 14.16'}
 
+  pg-cloudflare@1.4.0:
+    resolution: {integrity: sha512-Vo7z/6rrQYxpNRylp4Tlob2elzbh+N/MOQbxFVWCxS7oEx6jF53GTJFxK2WWpKuBRkmiin4Mt+xofFDjx09R0A==}
+
+  pg-connection-string@2.13.0:
+    resolution: {integrity: sha512-EMnU9E2fSULdsbErBbMaXJvFeD9B4+nPcM3f+4lsiCR0BHLPrLVjv3DbyM2hgQQviKJaTWIRRTjKjWlHg3p2ig==}
+
+  pg-int8@1.0.1:
+    resolution: {integrity: sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw==}
+    engines: {node: '>=4.0.0'}
+
+  pg-pool@3.14.0:
+    resolution: {integrity: sha512-gKtPkFdQPU3DksooVLi9LsjZxrsBUZIpa+7aVx+LV5pNh0KzP4Zleud2po+ConrxbuXGBJ6Hfer6hdgpIBpBaw==}
+    peerDependencies:
+      pg: '>=8.0'
+
+  pg-protocol@1.14.0:
+    resolution: {integrity: sha512-n5taZ1kO3s9ngDTVxsEznOqCyToTgz0FLuPq0B33COy5pPpuWJpY3/2oRBVETuOgzdqRXfWpM9HIhp2LBBT1BA==}
+
+  pg-types@2.2.0:
+    resolution: {integrity: sha512-qTAAlrEsl8s4OiEQY69wDvcMIdQN6wdz5ojQiOy6YRMuynxenON0O5oCpJI6lshc6scgAY8qvJ2On/p+CXY0GA==}
+    engines: {node: '>=4'}
+
+  pg@8.21.0:
+    resolution: {integrity: sha512-AUP1EYJuHraQGsVoCQVIcM7TEJVGtDzxWtGFZd8rds9d+CCXlU5Js1rYgfLNvxy9iJrpHjGrRjoi/3BT9fRyiA==}
+    engines: {node: '>= 16.0.0'}
+    peerDependencies:
+      pg-native: '>=3.0.1'
+    peerDependenciesMeta:
+      pg-native:
+        optional: true
+
+  pgpass@1.0.5:
+    resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -2326,6 +2388,22 @@ packages:
   postcss@8.5.15:
     resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
     engines: {node: ^10 || ^12 || >=14}
+
+  postgres-array@2.0.0:
+    resolution: {integrity: sha512-VpZrUqU5A69eQyW2c5CA1jtLecCsN2U/bD6VilrFDWq5+5UIEVO7nazS3TEcHf1zuPYO/sqGvUvW62g86RXZuA==}
+    engines: {node: '>=4'}
+
+  postgres-bytea@1.0.1:
+    resolution: {integrity: sha512-5+5HqXnsZPE65IJZSMkZtURARZelel2oXUEO8rH83VS/hxH5vv1uHquPg5wZs8yMAfdv971IU+kcPUczi7NVBQ==}
+    engines: {node: '>=0.10.0'}
+
+  postgres-date@1.0.7:
+    resolution: {integrity: sha512-suDmjLVQg78nMK2UZ454hAG+OAW+HQPZ6n++TNDUX+L0+uUlLywnoxJKDou51Zm+zTCjrCl0Nq6J9C5hP9vK/Q==}
+    engines: {node: '>=0.10.0'}
+
+  postgres-interval@1.2.0:
+    resolution: {integrity: sha512-9ZhXKM/rw350N1ovuWHbGxnGh/SNJ4cnxHiM0rxE4VN41wsg8P8zWn9hv/buK00RP4WvlOyr/RBDiptyxVbkZQ==}
+    engines: {node: '>=0.10.0'}
 
   postgres@3.4.5:
     resolution: {integrity: sha512-cDWgoah1Gez9rN3H4165peY9qfpEo+SA61oQv65O3cRUE1pOEoJWwddwcqKE8XZYjbblOJlYDlLV4h67HrEVDg==}
@@ -2463,6 +2541,10 @@ packages:
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
+
+  split2@4.2.0:
+    resolution: {integrity: sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg==}
+    engines: {node: '>= 10.x'}
 
   stable-hash@0.0.5:
     resolution: {integrity: sha512-+L3ccpzibovGXFK+Ap/f8LOS0ahMrHTf3xu7mMLSpEGU0EO9ucaysSylKo9eRDFNhWve/y275iPmIZ4z39a9iA==}
@@ -2715,6 +2797,10 @@ packages:
   xml-naming@0.1.0:
     resolution: {integrity: sha512-k8KO9hrMyNk6tUWqUfkTEZbezRRpONVOzUTnc97VnCvyj6Tf9lyUR9EDAIeiVLv56jsMcoXEwjW8Kv5yPY52lw==}
     engines: {node: '>=16.0.0'}
+
+  xtend@4.0.2:
+    resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
+    engines: {node: '>=0.4'}
 
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
@@ -3493,6 +3579,10 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
+  '@types/adm-zip@0.5.8':
+    dependencies:
+      '@types/node': 22.10.5
+
   '@types/estree@1.0.8': {}
 
   '@types/estree@1.0.9': {}
@@ -3504,6 +3594,12 @@ snapshots:
   '@types/node@22.10.5':
     dependencies:
       undici-types: 6.20.0
+
+  '@types/pg@8.20.0':
+    dependencies:
+      '@types/node': 22.10.5
+      pg-protocol: 1.14.0
+      pg-types: 2.2.0
 
   '@types/react-dom@19.0.2(@types/react@19.0.2)':
     dependencies:
@@ -3733,6 +3829,8 @@ snapshots:
 
   acorn@8.16.0: {}
 
+  adm-zip@0.5.17: {}
+
   ajv@6.15.0:
     dependencies:
       fast-deep-equal: 3.1.3
@@ -3961,10 +4059,12 @@ snapshots:
     dependencies:
       esutils: 2.0.3
 
-  drizzle-orm@0.36.4(@electric-sql/pglite@0.2.14)(@types/react@19.0.2)(postgres@3.4.5)(react@19.0.0):
+  drizzle-orm@0.36.4(@electric-sql/pglite@0.2.14)(@types/pg@8.20.0)(@types/react@19.0.2)(pg@8.21.0)(postgres@3.4.5)(react@19.0.0):
     optionalDependencies:
       '@electric-sql/pglite': 0.2.14
+      '@types/pg': 8.20.0
       '@types/react': 19.0.2
+      pg: 8.21.0
       postgres: 3.4.5
       react: 19.0.0
 
@@ -4819,6 +4919,41 @@ snapshots:
 
   pathval@2.0.1: {}
 
+  pg-cloudflare@1.4.0:
+    optional: true
+
+  pg-connection-string@2.13.0: {}
+
+  pg-int8@1.0.1: {}
+
+  pg-pool@3.14.0(pg@8.21.0):
+    dependencies:
+      pg: 8.21.0
+
+  pg-protocol@1.14.0: {}
+
+  pg-types@2.2.0:
+    dependencies:
+      pg-int8: 1.0.1
+      postgres-array: 2.0.0
+      postgres-bytea: 1.0.1
+      postgres-date: 1.0.7
+      postgres-interval: 1.2.0
+
+  pg@8.21.0:
+    dependencies:
+      pg-connection-string: 2.13.0
+      pg-pool: 3.14.0(pg@8.21.0)
+      pg-protocol: 1.14.0
+      pg-types: 2.2.0
+      pgpass: 1.0.5
+    optionalDependencies:
+      pg-cloudflare: 1.4.0
+
+  pgpass@1.0.5:
+    dependencies:
+      split2: 4.2.0
+
   picocolors@1.1.1: {}
 
   picomatch@2.3.2: {}
@@ -4838,6 +4973,16 @@ snapshots:
       nanoid: 3.3.12
       picocolors: 1.1.1
       source-map-js: 1.2.1
+
+  postgres-array@2.0.0: {}
+
+  postgres-bytea@1.0.1: {}
+
+  postgres-date@1.0.7: {}
+
+  postgres-interval@1.2.0:
+    dependencies:
+      xtend: 4.0.2
 
   postgres@3.4.5: {}
 
@@ -5050,6 +5195,8 @@ snapshots:
   siginfo@2.0.0: {}
 
   source-map-js@1.2.1: {}
+
+  split2@4.2.0: {}
 
   stable-hash@0.0.5: {}
 
@@ -5367,5 +5514,7 @@ snapshots:
   word-wrap@1.2.5: {}
 
   xml-naming@0.1.0: {}
+
+  xtend@4.0.2: {}
 
   yocto-queue@0.1.0: {}
