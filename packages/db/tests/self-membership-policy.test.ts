@@ -216,6 +216,58 @@ describe("PMB-74 app_self_membership policy (migration 0019)", () => {
     });
   });
 
+  it("REJECTS UPDATE under app.current_user_id only (PMB-77: no policy permits UPDATE)", async () => {
+    // After migration 0020 the self-membership policy is FOR SELECT + FOR
+    // INSERT only. UPDATE then falls through to app_isolation, which requires
+    // app.current_tenant_id to be set. With only the user GUC set, no policy
+    // permits the UPDATE — RLS treats the row as invisible and the statement
+    // updates zero rows (RLS rejects the row from USING, rather than raising).
+    // We assert the role row in Org A is unchanged.
+    s = await seed(db);
+    await withUserContext(db, USER_ALICE, async () => {
+      await db.execute(sql`
+        update organization_memberships
+           set role = 'admin'
+         where user_id = ${USER_ALICE}
+      `);
+    });
+
+    // Verify with an unrestricted role that Alice's roles in A/B are unchanged.
+    await db.$client.exec(`reset role;`);
+    const rows = await db.execute<{ tenant_id: string; role: string }>(sql`
+      select tenant_id, role from organization_memberships
+       where user_id = ${USER_ALICE}
+       order by tenant_id
+    `);
+    const roles = new Set(rows.rows.map((r) => r.role));
+    // Original seed: admin in A, mechanic in B. If the UPDATE had been
+    // permitted by RLS we'd see admin in both. Asserting mechanic survives
+    // proves the policy did not authorize the row.
+    expect(roles.has("mechanic")).toBe(true);
+  });
+
+  it("REJECTS DELETE under app.current_user_id only (PMB-77: no policy permits DELETE)", async () => {
+    // Same rationale as UPDATE: DELETE falls through to app_isolation, which
+    // needs the tenant GUC; with only the user GUC set no policy permits the
+    // DELETE, so the statement deletes zero rows.
+    s = await seed(db);
+    await withUserContext(db, USER_ALICE, async () => {
+      await db.execute(sql`
+        delete from organization_memberships
+         where user_id = ${USER_ALICE}
+      `);
+    });
+
+    await db.$client.exec(`reset role;`);
+    const rows = await db.execute<{ tenant_id: string }>(sql`
+      select tenant_id from organization_memberships
+       where user_id = ${USER_ALICE}
+    `);
+    // Alice still has her two memberships (A and B) — RLS did not authorize
+    // the delete.
+    expect(rows.rows).toHaveLength(2);
+  });
+
   it("does NOT regress the tenant-scoped read path (app_isolation still works)", async () => {
     s = await seed(db);
     await db.$client.exec(`set role ${TENANT_APP_ROLE};`);
