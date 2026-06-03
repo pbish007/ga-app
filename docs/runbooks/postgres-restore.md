@@ -250,3 +250,73 @@ immediately) or a runbook gap — note it in §5 and patch this document.
 | Date       | Tier   | Operator | Result | Notes / linked issue |
 | ---------- | ------ | -------- | ------ | -------------------- |
 | 2026-05-27 | Phase A (Neon Free) | CTO ([@Founding Engineer](agent://cc7304c9-2164-4f4b-a9d1-c2e12cd1440e)) | **PASS** — 28/28 sample tables match (regime spine + RBAC populated, domain tables empty on both sides); restore 11s, verify 23s, total 34s, vs Phase A RTO budget 7200s. | [PMB-22](/PMB/issues/PMB-22), `drill-out/report.json` attached to the issue. Two runbook gaps caught and patched in the same commit: §3.2 project slug + §3.3 default branch name (`production`, not `main`). |
+
+Manual drills (§3.7) belong in this table. The trend produced by the
+automated monthly verifier lives in `postgres-restore-history.md` and is
+appended by the workflow itself — do not hand-edit that file.
+
+---
+
+## 6. Monthly automated backup verification (J1.3)
+
+Owner: DevOpsEngineer (configures + maintains workflow). Last-resort
+operator on a failed run: CTO.
+
+The drill in §3.7 is a manual quarterly exercise on Phase A; once we have a
+recurring credential it is also worth running it on a schedule so the
+RTO/verify pair stays observable between hand-drills. That is what
+`.github/workflows/db-backup-verify.yml` does:
+
+1. Cron `0 12 1 * *` (12:00 UTC on the 1st of each month) — also runnable
+   on demand via `workflow_dispatch`.
+2. Creates a Neon branch off the production primary's current PITR
+   (`backup-verify-<UTC-timestamp>-<run-id>`).
+3. Pulls a connection URI for the new branch's compute, then runs
+   `packages/db/scripts/backup-verify-baseline.sh`, which wraps the
+   existing `drill-verify.sh` and asserts:
+   - every sample table in `drill-verify.sh` exists,
+   - `schema_migrations` row count equals the number of `*.sql` files in
+     `packages/db/migrations`,
+   - `regimes` has exactly one row (FAA seed).
+4. Fails the run if total RTO exceeds 5× the J1.2 baseline (170 s).
+5. Always deletes the verification branch (cleanup step is `if: always()`).
+6. On success, opens a small PR appending one row to
+   `postgres-restore-history.md`.
+7. On any failure (verify, budget, API, cleanup), opens a GitHub issue
+   labelled `ops, db-backup-verify, incident` so the CEO sees it without
+   needing to watch the Actions tab.
+
+### Secret + rotation
+
+The workflow requires the `NEON_API_KEY` repo secret. The key must be:
+
+- Scoped to the `ga-app-prod` project only (not org-wide).
+- Permissioned for branch create / delete / read on that project. Read on
+  `connection_uri` is also required (it returns the role password to
+  GitHub Actions; the response is masked).
+- Rotated every 90 days. Add the next rotation date to the calendar
+  whenever the key is provisioned; this runbook only carries the policy.
+
+Do **not** wire the single-use, board-pasted keys we use during ad-hoc
+provisioning into this workflow — they go stale and the monthly schedule
+will start filing failure issues.
+
+### When this workflow fires a failure issue
+
+Triage steps:
+
+1. Open the linked run, find the failing step.
+2. If `Run baseline verifier` failed, the report artifact
+   (`backup-verify-report-<run_id>`) contains the per-check diagnosis.
+   Typical causes: a new table added without bumping the verifier's
+   `SAMPLE_TABLES` list; a migration applied to production by a path that
+   skipped `schema_migrations` (should not happen with `migrate.sh`).
+3. If `Enforce RTO budget` failed, the schema verified fine but Neon
+   restore latency is up. Check Neon status; consider re-running once
+   manually to rule out a transient blip before paging.
+4. If `Create ephemeral branch` failed, check the Neon API key (expired?
+   wrong project scope?) — see §6 "Secret + rotation".
+5. If `Cleanup` failed, manually delete the verification branch in the
+   Neon console (project `ga-app-prod` → Branches → filter `backup-verify-`)
+   before closing the failure issue. A leaked branch counts against the
+   Phase A quota.

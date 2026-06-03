@@ -1,0 +1,314 @@
+name: DB backup verify (monthly)
+
+# Monthly Neon backup-verification (PMB-87 / J epic).
+#
+# Creates a fresh Neon branch off the production primary's current PITR,
+# runs the in-repo verifier against the new branch, captures timings, and
+# always deletes the branch in a cleanup step (Phase A has a branch quota).
+#
+# Failure semantics:
+#   - schema mismatch (missing sample table, schema_migrations count off,
+#     or seed regimes row missing) → workflow fails the verify step.
+#   - restore wall-clock above 5x the J1.2 baseline (5 * 34s = 170s) →
+#     workflow fails the budget gate after the verify step.
+#   - any API / cleanup error → workflow fails its step.
+#   - on any failure, the final `if: failure()` step opens (or reuses) a
+#     GitHub Issue tagged db-backup-verify so the CEO sees it without
+#     needing to watch the Actions tab.
+#
+# Guardrails:
+#   - Reads the production project but DOES NOT touch the production
+#     branch directly. All queries hit the ephemeral verification branch.
+#   - Uses the dedicated NEON_API_KEY repo secret (scoped to ga-app-prod,
+#     branch CRUD + read). The single-use, board-pasted keys must not be
+#     wired up here — they go stale and the monthly schedule will start
+#     filing failure issues.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 12:00 UTC on the 1st of each month. Avoids the Neon control-plane
+    # peak that hits midnight UTC at month rollover.
+    - cron: '0 12 1 * *'
+
+concurrency:
+  group: db-backup-verify
+  cancel-in-progress: false
+
+permissions:
+  # contents: write — needed so the trend-append step can push a small
+  # follow-up branch with the new history row.
+  # pull-requests: write — needed so `gh pr create` can open the trend PR.
+  # issues: write — needed so the failure step can file an incident issue.
+  contents: write
+  issues: write
+  pull-requests: write
+
+env:
+  NEON_API_BASE: https://console.neon.tech/api/v2
+  NEON_PROJECT_ID: royal-darkness-36853636
+  NEON_PARENT_BRANCH_ID: br-hidden-paper-ajvti0sx
+  NEON_ROLE_NAME: neondb_owner
+  NEON_DATABASE_NAME: neondb
+  BASELINE_TOTAL_SECONDS: '34'
+  BUDGET_MULTIPLIER: '5'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      branch_id: ${{ steps.create_branch.outputs.branch_id }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Confirm psql + jq are available
+        run: |
+          psql --version
+          jq --version
+          python3 --version
+
+      - name: Validate NEON_API_KEY secret is present
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          if [ -z "${NEON_API_KEY}" ]; then
+            echo "::error::NEON_API_KEY repo secret is not set. See PMB-87 guardrails." >&2
+            exit 1
+          fi
+          echo "NEON_API_KEY secret length: ${#NEON_API_KEY}"
+
+      - name: Create ephemeral branch from PITR (timed)
+        id: create_branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          set -euo pipefail
+          branch_name="backup-verify-$(date -u +%Y%m%d-%H%M%S)-${GITHUB_RUN_ID}"
+          echo "Creating branch ${branch_name} from parent ${NEON_PARENT_BRANCH_ID}"
+
+          start=$(date -u +%s)
+          create_response="$(
+            curl -fsS -X POST "${NEON_API_BASE}/projects/${NEON_PROJECT_ID}/branches" \
+              -H "Authorization: Bearer ${NEON_API_KEY}" \
+              -H "Accept: application/json" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg name "$branch_name" --arg parent "$NEON_PARENT_BRANCH_ID" '{
+                branch: { name: $name, parent_id: $parent },
+                endpoints: [ { type: "read_write" } ]
+              }')"
+          )"
+
+          branch_id="$(echo "$create_response" | jq -r '.branch.id')"
+          if [ -z "$branch_id" ] || [ "$branch_id" = "null" ]; then
+            echo "::error::Neon branch create did not return an id. Response:" >&2
+            echo "$create_response" >&2
+            exit 1
+          fi
+          echo "branch_id=${branch_id}" >> "$GITHUB_OUTPUT"
+          echo "branch_name=${branch_name}" >> "$GITHUB_OUTPUT"
+
+          # Poll branch operations until all are finished. Neon returns the
+          # operations[] array from the create call; each needs to reach
+          # status=finished before the branch+compute is queryable.
+          op_ids="$(echo "$create_response" | jq -r '.operations[].id')"
+          for op_id in $op_ids; do
+            echo "Waiting for operation ${op_id}..."
+            for attempt in $(seq 1 60); do
+              status="$(
+                curl -fsS "${NEON_API_BASE}/projects/${NEON_PROJECT_ID}/operations/${op_id}" \
+                  -H "Authorization: Bearer ${NEON_API_KEY}" \
+                  -H "Accept: application/json" |
+                jq -r '.operation.status'
+              )"
+              case "$status" in
+                finished)
+                  echo "  ${op_id} finished after ${attempt} polls"
+                  break
+                  ;;
+                failed|error|cancelled|cancelling)
+                  echo "::error::Neon operation ${op_id} entered terminal-failure state: ${status}" >&2
+                  exit 1
+                  ;;
+                *)
+                  sleep 5
+                  ;;
+              esac
+              if [ "$attempt" -eq 60 ]; then
+                echo "::error::Neon operation ${op_id} did not finish within 300s (status=${status})." >&2
+                exit 1
+              fi
+            done
+          done
+
+          end=$(date -u +%s)
+          restore_seconds=$((end - start))
+          echo "restore_seconds=${restore_seconds}" >> "$GITHUB_OUTPUT"
+          echo "Branch ${branch_id} ready in ${restore_seconds}s"
+
+      - name: Fetch connection URI for ephemeral branch
+        id: connection
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          BRANCH_ID: ${{ steps.create_branch.outputs.branch_id }}
+        run: |
+          set -euo pipefail
+          uri="$(
+            curl -fsS -G "${NEON_API_BASE}/projects/${NEON_PROJECT_ID}/connection_uri" \
+              -H "Authorization: Bearer ${NEON_API_KEY}" \
+              -H "Accept: application/json" \
+              --data-urlencode "branch_id=${BRANCH_ID}" \
+              --data-urlencode "role_name=${NEON_ROLE_NAME}" \
+              --data-urlencode "database_name=${NEON_DATABASE_NAME}" \
+              --data-urlencode "pooled=false" |
+            jq -r '.uri'
+          )"
+          if [ -z "$uri" ] || [ "$uri" = "null" ]; then
+            echo "::error::Neon connection_uri returned an empty URI." >&2
+            exit 1
+          fi
+          # Append sslmode=require if absent — drill-verify.sh refuses to
+          # run without an explicit sslmode declaration.
+          case "$uri" in
+            *sslmode=*) ;;
+            *\?*) uri="${uri}&sslmode=require" ;;
+            *)    uri="${uri}?sslmode=require" ;;
+          esac
+          echo "::add-mask::${uri}"
+          echo "uri=${uri}" >> "$GITHUB_OUTPUT"
+
+      - name: Run baseline verifier
+        id: verify
+        env:
+          DATABASE_URL_DIRECT: ${{ steps.connection.outputs.uri }}
+          RESTORE_DURATION_SECONDS: ${{ steps.create_branch.outputs.restore_seconds }}
+          OUT_FILE: ./backup-verify-out/report.json
+        run: |
+          set -euo pipefail
+          bash packages/db/scripts/backup-verify-baseline.sh
+          echo "report=./backup-verify-out/report.json" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce RTO budget (5x baseline)
+        env:
+          REPORT: ./backup-verify-out/report.json
+        run: |
+          set -euo pipefail
+          total=$(jq -r '.total_seconds' "$REPORT")
+          budget=$(( BASELINE_TOTAL_SECONDS * BUDGET_MULTIPLIER ))
+          echo "total_seconds=${total}, budget=${budget}"
+          if [ "$total" -gt "$budget" ]; then
+            echo "::error::Total RTO ${total}s exceeds ${BUDGET_MULTIPLIER}x baseline (${budget}s)." >&2
+            exit 1
+          fi
+
+      - name: Upload verification report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-verify-report-${{ github.run_id }}
+          path: ./backup-verify-out/report.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Append run to trend history
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPORT: ./backup-verify-out/report.json
+          TRIGGER: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          history=docs/runbooks/postgres-restore-history.md
+          if [ ! -f "$history" ]; then
+            echo "::error::${history} missing; cannot append trend row." >&2
+            exit 1
+          fi
+
+          ts_utc=$(jq -r '.captured_at_utc // "unknown"' "$REPORT")
+          restore=$(jq -r '.restore_seconds' "$REPORT")
+          verify=$(jq -r '.verify_seconds' "$REPORT")
+          total=$(jq -r '.total_seconds' "$REPORT")
+          tables_total=$(jq -r '.tables_total' "$REPORT")
+          tables_matched=$(jq -r '.tables_matched' "$REPORT")
+          server_version=$(jq -r '.server_version // "?"' "$REPORT")
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          row="| ${ts_utc} | ${TRIGGER} | ${restore} | ${verify} | ${total} | ${tables_matched}/${tables_total} | ${server_version} | [run](${run_url}) |"
+
+          printf '%s\n' "$row" >> "$history"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="ci/backup-verify-history-${GITHUB_RUN_ID}"
+          git checkout -b "$branch"
+          git add "$history"
+          git commit -m "chore(ops): append backup-verify trend row $(date -u +%Y-%m-%d) (PMB-87)
+
+Co-Authored-By: Paperclip <noreply@paperclip.ing>"
+          git push -u origin "$branch"
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "chore(ops): backup-verify trend row $(date -u +%Y-%m-%d)" \
+            --body "Auto-generated by db-backup-verify.yml (PMB-87). Adds one row to docs/runbooks/postgres-restore-history.md.
+
+Trigger: ${TRIGGER}
+Run: ${run_url}"
+
+      - name: Cleanup — delete verification branch
+        if: always() && steps.create_branch.outputs.branch_id != ''
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          BRANCH_ID: ${{ steps.create_branch.outputs.branch_id }}
+        run: |
+          set -euo pipefail
+          echo "Deleting Neon branch ${BRANCH_ID}"
+          # Neon enforces a hard guardrail against deleting the primary
+          # branch via the API; even so we fail loudly if the id ever
+          # equals the parent.
+          if [ "$BRANCH_ID" = "$NEON_PARENT_BRANCH_ID" ]; then
+            echo "::error::Refusing to delete the production primary branch." >&2
+            exit 1
+          fi
+          http_code=$(
+            curl -sS -o /tmp/neon-delete.json -w '%{http_code}' \
+              -X DELETE "${NEON_API_BASE}/projects/${NEON_PROJECT_ID}/branches/${BRANCH_ID}" \
+              -H "Authorization: Bearer ${NEON_API_KEY}" \
+              -H "Accept: application/json"
+          )
+          echo "Neon delete response (${http_code}):"
+          cat /tmp/neon-delete.json || true
+          case "$http_code" in
+            2*) echo "Branch deleted." ;;
+            404) echo "Branch already gone (404) — treating as success." ;;
+            *)
+              echo "::error::Neon branch delete returned HTTP ${http_code}." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Open failure issue
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `db-backup-verify failed (run ${context.runId})`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `Monthly Neon backup verification workflow failed.`,
+              ``,
+              `- Workflow: \`db-backup-verify.yml\``,
+              `- Run: ${runUrl}`,
+              `- Trigger: \`${context.eventName}\``,
+              `- Commit: \`${context.sha}\``,
+              ``,
+              `See PMB-87 for context and the runbook section in \`docs/runbooks/postgres-restore.md\` §6.`,
+              ``,
+              `Cleanup step always runs, but verify the ephemeral branch was deleted in the Neon console (project \`ga-app-prod\`).`
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['ops', 'db-backup-verify', 'incident']
+            });
