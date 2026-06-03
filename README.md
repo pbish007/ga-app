@@ -50,6 +50,8 @@ These four commands also run in CI on every push and PR (`.github/workflows/ci.y
 
 Production hosting: **Vercel** (per stack ADR).
 
+This repo is linked to **exactly one** Vercel project: `ga-app` (`prj_Z8UAfPx4m73Kt1xp2SL9sLZW7OUc`, rootDirectory `apps/web`, framework `nextjs`). Do not let Vercel auto-create a sibling project — a duplicate without a rootDirectory will fail every preview build and train the team to ignore red checks. See PMB-93 for the retirement of the stray `_default` project.
+
 1. Create a Vercel project pointed at this repo. Root directory: `apps/web`. Build & install commands auto-detected (Next.js + pnpm).
 2. Connect the GitHub repo. Vercel will deploy `main` to production and every PR to a preview URL on push.
 3. After the first deploy, point the production URL to a custom domain when ready.
