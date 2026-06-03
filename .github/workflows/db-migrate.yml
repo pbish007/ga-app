@@ -13,6 +13,16 @@ name: DB migrate (production)
 
 on:
   workflow_dispatch:
+    inputs:
+      synthetic_fail:
+        description: 'Force a synthetic failure to verify the alert path. Skips the migrate step.'
+        type: boolean
+        default: false
+        required: false
+
+permissions:
+  contents: read
+  issues: write
 
 concurrency:
   group: db-migrate-prod
@@ -24,6 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Synthetic failure (test the alert path; does not touch the DB)
+        if: ${{ inputs.synthetic_fail == true }}
+        run: |
+          echo "::error::Synthetic failure requested via workflow_dispatch input." >&2
+          exit 1
+
       # ubuntu-latest ships a postgresql-client (psql >= 14); no install step.
       - name: Confirm psql is available
         run: psql --version
@@ -32,3 +48,32 @@ jobs:
         env:
           DATABASE_URL_DIRECT: ${{ secrets.DATABASE_URL_DIRECT }}
         run: bash packages/db/scripts/migrate.sh
+
+      - name: File GitHub issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+        with:
+          script: |
+            const workflow = process.env.WORKFLOW_NAME;
+            const sha = context.sha.substring(0, 7);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `Workflow failed: ${workflow} @ ${sha}`;
+            const body = [
+              `**Workflow:** ${workflow}`,
+              `**Commit:** ${context.sha}`,
+              `**Ref:** ${context.ref}`,
+              `**Actor:** @${context.actor}`,
+              `**Run:** ${runUrl}`,
+              ``,
+              `Filed automatically by the failure-notification step. See \`docs/runbooks/observability.md\`.`,
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['ops', 'workflow-failure'],
+              assignees: ['pbish007'],
+            });
