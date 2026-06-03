@@ -39,3 +39,19 @@ export {
   type AddCredentialInput,
   type CanSignOffOptions,
 } from "./credentials.js";
+export {
+  EmailAlreadyExists,
+  IdempotencyConflict,
+  InvalidRegime,
+  ProvisioningError,
+  TenantProvisioningService,
+  ValidationError,
+  provisionTenant,
+  type InviteMailerDeps,
+  type ProvisionAdditionalSeat,
+  type ProvisionedBy,
+  type ProvisionTenantDeps,
+  type ProvisionTenantInput,
+  type ProvisionTenantResult,
+  type ProvisioningErrorCode,
+} from "./tenant-provisioning.js";

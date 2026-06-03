@@ -10,3 +10,4 @@ export * from "./squawks.js";
 export * from "./maintenance-entries.js";
 export * from "./notifications.js";
 export * from "./platform-admins.js";
+export * from "./tenant-provisioning-audit.js";

@@ -108,6 +108,16 @@ export type {
   NewPlatformAdmin,
   PlatformAdmin,
 } from "./schema/platform-admins.js";
+export type {
+  NewTenantProvisioningAuditRow,
+  ProvisioningActorKind,
+  ProvisioningResultStatus,
+  TenantProvisioningAuditRow,
+} from "./schema/tenant-provisioning-audit.js";
+export {
+  PROVISIONING_ACTOR_KINDS,
+  PROVISIONING_RESULT_STATUSES,
+} from "./schema/tenant-provisioning-audit.js";
 export {
   setupTestDb,
   setupTestSuite,
