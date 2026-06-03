@@ -1,0 +1,99 @@
+name: DB seed QA platform admin (production)
+
+# Manual, guarded seed of the dedicated QA platform-admin user used by the
+# fresh-tenant smoke (PMB-121, .github/workflows/smoke.yml) and the PMB-129
+# end-to-end verification of /admin/tenants/new.
+#
+# Idempotent: re-running rotates the password hash on the same user row and
+# guarantees an active platform_admins grant. Touches only the QA user.
+#
+# Required GitHub Actions secrets (repo scope):
+#   DATABASE_URL_DIRECT             — Neon direct connection string, prod
+#   QA_PLATFORM_ADMIN_EMAIL         — e.g. qa-smoke-admin@gaapp.io
+#   QA_PLATFORM_ADMIN_PASSWORD_HASH — scrypt$salt$derived (see packages/accounts/src/password.ts)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type SEED-QA-ADMIN to confirm seeding / rotating the QA platform admin'
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: db-seed-qa-admin-prod
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    if: ${{ inputs.confirm == 'SEED-QA-ADMIN' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Confirm psql is available
+        run: psql --version
+
+      - name: Validate secrets are set
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.DATABASE_URL_DIRECT }}
+          QA_EMAIL: ${{ secrets.QA_PLATFORM_ADMIN_EMAIL }}
+          QA_HASH: ${{ secrets.QA_PLATFORM_ADMIN_PASSWORD_HASH }}
+        run: |
+          if [ -z "${DATABASE_URL_DIRECT}" ]; then
+            echo "::error::DATABASE_URL_DIRECT secret is not set." >&2; exit 1
+          fi
+          if [ -z "${QA_EMAIL}" ]; then
+            echo "::error::QA_PLATFORM_ADMIN_EMAIL secret is not set." >&2; exit 1
+          fi
+          if [ -z "${QA_HASH}" ]; then
+            echo "::error::QA_PLATFORM_ADMIN_PASSWORD_HASH secret is not set." >&2; exit 1
+          fi
+          case "${DATABASE_URL_DIRECT}" in
+            *sslmode=require*|*sslmode=verify-ca*|*sslmode=verify-full*) ;;
+            *) echo "::error::DATABASE_URL_DIRECT must include sslmode=require." >&2; exit 1;;
+          esac
+
+      - name: Apply QA platform-admin seed
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.DATABASE_URL_DIRECT }}
+          PGOPTIONS: >-
+            -c app.qa_platform_admin_email=${{ secrets.QA_PLATFORM_ADMIN_EMAIL }}
+            -c app.qa_platform_admin_password_hash=${{ secrets.QA_PLATFORM_ADMIN_PASSWORD_HASH }}
+        run: |
+          psql --set ON_ERROR_STOP=1 --no-psqlrc \
+            "${DATABASE_URL_DIRECT}" \
+            --file=packages/db/scripts/seed-qa-platform-admin.sql
+
+      - name: File GitHub issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+        with:
+          script: |
+            const workflow = process.env.WORKFLOW_NAME;
+            const sha = context.sha.substring(0, 7);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `Workflow failed: ${workflow} @ ${sha}`;
+            const body = [
+              `**Workflow:** ${workflow}`,
+              `**Commit:** ${context.sha}`,
+              `**Ref:** ${context.ref}`,
+              `**Actor:** @${context.actor}`,
+              `**Run:** ${runUrl}`,
+              ``,
+              `Filed automatically by the failure-notification step. See \`docs/runbooks/observability.md\`.`,
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['ops', 'workflow-failure'],
+              assignees: ['pbish007'],
+            });
