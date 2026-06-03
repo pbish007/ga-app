@@ -26,10 +26,11 @@ export function getDb(): DocumentsDb {
 
 /**
  * Owner-class ("direct") connection for *system* tasks that legitimately
- * span tenants and need to bypass RLS — the scheduled notification sweep
- * (`apps/web/app/api/cron/notifications/route.ts`) and the one-shot
- * `bootstrap-demo` admin endpoint. These predate the runtime/owner split
- * and rely on the bare connection seeing rows across every tenant.
+ * span tenants and need to bypass RLS — currently the scheduled notification
+ * sweep (`apps/web/app/api/cron/notifications/route.ts`). (The one-shot
+ * `bootstrap-demo` admin endpoint was the other historical user; retired in
+ * PMB-62 after the MVP demo signed off.) These predate the runtime/owner
+ * split and rely on the bare connection seeing rows across every tenant.
  *
  * After PMB-74, the runtime `DATABASE_URL` repoints at the non-bypass
  * `tenant_runtime` role — at which point those cross-tenant system reads

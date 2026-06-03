@@ -9,14 +9,15 @@ It is the PMB-62 deliverable that replaces two stop-gaps used during the MVP
 front-door push:
 
 - pasting a Neon key into an issue comment to run `migrate.sh` from a dev box, and
-- runtime admin DDL endpoints (`POST /api/admin/run-migrations`, since removed;
-  `POST /api/admin/bootstrap-demo`, still live — retirement tracked in PMB-62).
+- runtime admin DDL endpoints (`POST /api/admin/run-migrations` and
+  `POST /api/admin/bootstrap-demo`, both retired — the latter in PMB-62 after
+  PMB-60 demo sign-off).
 
-> **Current status (2026-05-28):** the GitHub Actions path in §2 is wired but
-> **not yet operational** — its `DATABASE_URL_DIRECT` secret is unset (see §3).
-> Until that secret is set, migrations `0001`–`0016` were applied to prod via
-> the temporary PMB-64 runtime endpoint. Setting the secret is what turns §2
-> into the real path.
+> **Current status (2026-06-03):** the GitHub Actions path in §2 is the live
+> canonical path — the `DATABASE_URL_DIRECT` GH Actions secret is set. Use it
+> for any new migration. (Historical: migrations `0001`–`0016` were applied to
+> prod via the temporary PMB-64 runtime endpoint before the secret existed;
+> later migrations from `0017` onward run through §2.)
 
 ---
 
@@ -102,10 +103,10 @@ create their own data through the app.
   been removed). It was **not** applied via the GitHub Actions workflow, which
   is still waiting on its secret (§3). Its grant scope was security-reviewed —
   see the PMB-62 `security-review` document.
-- `POST /api/admin/bootstrap-demo` + `ADMIN_BOOTSTRAP_TOKEN` are **still live**.
-  Retirement is tracked in PMB-62, gated on the PMB-60 demo sign-off (the demo
-  still reseeds through this endpoint) plus the SecurityEngineer review.
-  `ADMIN_BOOTSTRAP_TOKEN` was rotated during PMB-64; remove it from Vercel when
-  the endpoint is retired.
+- `POST /api/admin/bootstrap-demo` + `ADMIN_BOOTSTRAP_TOKEN` are **retired**
+  (PMB-62, after PMB-60 demo sign-off and the SecurityEngineer review on
+  PMB-73). Route deleted; Vercel env var removed. The remaining seed path is
+  the `DB seed demo (production)` workflow (§4), which requires the secret
+  from §3 to be set.
 
 Related: `docs/runbooks/postgres-restore.md`.
