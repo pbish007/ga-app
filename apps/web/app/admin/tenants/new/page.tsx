@@ -42,8 +42,8 @@ export default async function NewTenantPage() {
   return (
     <main style={{ ...s.main, maxWidth: 640 }}>
       <p style={{ marginBottom: "0.5rem" }}>
-        <Link href="/orgs" style={s.link}>
-          ← Back
+        <Link href="/admin/tenants" style={s.link}>
+          ← All tenants
         </Link>
       </p>
       <h1 style={s.h1}>Provision a tenant</h1>
