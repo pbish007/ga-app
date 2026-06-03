@@ -14,12 +14,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      # R2 / Cloudflare — provisioned in PMB-104 DevOps sub-task
+      # GH Actions run id — surfaced into pipeline_runs.run_id for correlation.
+      GITHUB_RUN_ID: ${{ github.run_id }}
+      # R2 / Cloudflare — provisioned in PMB-114 (R0 envelope).
       R2_ACCOUNT_ID: ${{ secrets.FAA_R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.FAA_R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.FAA_R2_SECRET_ACCESS_KEY }}
       R2_BUCKET: faa-registry
-      # Supabase FAA project — provisioned in PMB-104 DevOps sub-task
+      # Supabase FAA project — provisioned in PMB-114 (R0 envelope).
       FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
 
     steps:
@@ -39,3 +41,24 @@ jobs:
 
       - name: Run FAA ingest
         run: pnpm --filter faa-pipeline ingest
+
+      - name: Notify on-call on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "[FAA ingest] FAILED — run ${{ github.run_id }} on ${{ github.run_started_at }}"
+          to: ${{ secrets.FAA_ONCALL_EMAIL }}
+          from: ${{ secrets.SMTP_FROM }}
+          body: |
+            FAA ingest workflow failed.
+
+            Run:      ${{ github.run_id }}
+            Started:  ${{ github.run_started_at }}
+            Trigger:  ${{ github.event_name }}
+            Logs:     https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Check faa_registry.pipeline_runs for the matching row + error_message.
