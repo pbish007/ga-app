@@ -27,3 +27,12 @@ export {
   type RequireSignoffDeps,
   type RequireSignoffInput,
 } from "./requireSignoff";
+export {
+  createPlatformAdminCache,
+  isPlatformAdmin,
+  requirePlatformAdmin,
+  type IsPlatformAdminDeps,
+  type PlatformAdminCache,
+  type PlatformAdminContext,
+  type RequirePlatformAdminDeps,
+} from "./platform-admin";

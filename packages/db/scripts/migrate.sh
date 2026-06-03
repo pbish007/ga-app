@@ -45,6 +45,22 @@ case "$DATABASE_URL_DIRECT" in
     ;;
 esac
 
+# Pass select migration-time configuration through to the psql session as
+# Postgres custom GUCs so DO blocks inside migrations can read them via
+# `current_setting(..., true)`. Add new entries here as additional bootstrap
+# parameters appear — never inline secrets into the SQL files.
+#
+#   PLATFORM_ADMIN_BOOTSTRAP_EMAIL → app.platform_admin_bootstrap_email
+#     Used by migration 0023 (PMB-116) to seed the first row of
+#     `platform_admins` for the email's matching user. No-op when unset.
+PGOPTIONS_PARTS=()
+if [[ -n "${PLATFORM_ADMIN_BOOTSTRAP_EMAIL:-}" ]]; then
+  PGOPTIONS_PARTS+=("-c app.platform_admin_bootstrap_email=$PLATFORM_ADMIN_BOOTSTRAP_EMAIL")
+fi
+if [[ ${#PGOPTIONS_PARTS[@]} -gt 0 ]]; then
+  export PGOPTIONS="${PGOPTIONS_PARTS[*]}"
+fi
+
 PSQL=(psql --set ON_ERROR_STOP=1 --no-psqlrc --quiet "$DATABASE_URL_DIRECT")
 
 # Create the tracking table once. Idempotent.

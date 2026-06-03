@@ -9,3 +9,4 @@ export * from "./flight-time.js";
 export * from "./squawks.js";
 export * from "./maintenance-entries.js";
 export * from "./notifications.js";
+export * from "./platform-admins.js";

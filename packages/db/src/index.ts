@@ -104,6 +104,10 @@ export type {
   NotificationPreferences,
 } from "./schema/notifications.js";
 export { NOTIFICATION_LEVELS } from "./schema/notifications.js";
+export type {
+  NewPlatformAdmin,
+  PlatformAdmin,
+} from "./schema/platform-admins.js";
 export {
   setupTestDb,
   setupTestSuite,
