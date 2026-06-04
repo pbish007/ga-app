@@ -43,18 +43,62 @@ Re-running the same `SNAPSHOT_DATE`:
 
 Override the date for backfills with `SNAPSHOT_DATE=2026-06-01`.
 
+## Storage modes (PMB-144)
+
+The pipeline supports two `STORAGE_MODE` values, set per workflow run:
+
+### `lakefs` (default for new runs)
+
+The ingest extracts the 5 FAA files to `LAKEFS_STAGING_DIR/raw/YYYY-MM-DD/{FILE}.txt`
+on disk, then a downstream GH Actions step does:
+
+```
+lakectl fs upload --pre-sign -s <staged-file> lakefs://faa-registry/main/raw/<date>/<FILE>.txt
+lakectl commit lakefs://faa-registry/main -m "FAA ingest <date>" --meta source=faa-arweb --meta rows=<row-count>
+lakectl tag create  lakefs://faa-registry/ingest-<date> lakefs://faa-registry/main
+```
+
+`--pre-sign` tells lakectl to pull a pre-signed S3 URL from the lakeFS
+server and PUT to R2 itself, so the actual file bytes never traverse the
+Fly VM. (In older lakeFS releases the equivalent flag was `--direct`.)
+
+The Node ingest also writes `LAKEFS_STAGING_DIR/_summary.json` with
+`{ snapshotDate, totalRows, files: [...] }` for the workflow to consume.
+
+**Rollback recipe** — to point `main` back at the commit before an ingest:
+
+```
+lakectl revert lakefs://faa-registry/main <commit-hash>
+```
+
+The commit hash is in the workflow run's GitHub step summary, and on the
+`ingest-<date>` tag.
+
+### `r2` (legacy direct path, retained as a fallback)
+
+Bypasses lakeFS entirely and PUTs straight to R2 as in R1. Trigger from
+**Run workflow** with `storage_mode=r2` if lakeFS is wedged. The R2 bucket
+layout is identical between the two modes, so downstream consumers see no
+difference on the read path.
+
 ## Environment variables
 
 | Variable | Secret name | Description |
 |----------|-------------|-------------|
-| `R2_ACCOUNT_ID` | `FAA_R2_ACCOUNT_ID` | Cloudflare account ID |
-| `R2_ACCESS_KEY_ID` | `FAA_R2_ACCESS_KEY_ID` | R2 API key ID |
-| `R2_SECRET_ACCESS_KEY` | `FAA_R2_SECRET_ACCESS_KEY` | R2 API secret |
+| `STORAGE_MODE` | — | `lakefs` (default in the workflow) or `r2`. Selects whether the Node ingest writes directly to R2 or stages files for `lakectl`. |
+| `LAKEFS_STAGING_DIR` | — | Directory the Node ingest writes staged files to in `lakefs` mode (default: `$RUNNER_TEMP/faa-stage`). |
+| `R2_ACCOUNT_ID` | `FAA_R2_ACCOUNT_ID` | Cloudflare account ID (required when `STORAGE_MODE=r2`). |
+| `R2_ACCESS_KEY_ID` | `FAA_R2_ACCESS_KEY_ID` | R2 API key ID (required when `STORAGE_MODE=r2`). |
+| `R2_SECRET_ACCESS_KEY` | `FAA_R2_SECRET_ACCESS_KEY` | R2 API secret (required when `STORAGE_MODE=r2`). |
 | `R2_BUCKET` | — | `faa-registry` (default) |
 | `FAA_DATABASE_URL` | `FAA_DATABASE_URL` | Supabase FAA project connection string |
 | `FAA_ZIP_URL` | — | Override the FAA download URL (default: `https://registry.faa.gov/database/ReleasableAircraft.zip`) |
 | `SNAPSHOT_DATE` | — | Override the snapshot date (defaults to today UTC). Format `YYYY-MM-DD`. |
 | `GITHUB_RUN_ID` | — | GH Actions run id; recorded in `pipeline_runs.run_id`. |
+
+The workflow additionally reads `LAKEFS_ENDPOINT`, `LAKEFS_ACCESS_KEY_ID`,
+and `LAKEFS_SECRET_ACCESS_KEY` (provisioned in PMB-139) for the `lakectl`
+shell calls. The Node ingest never sees those.
 
 On-call failure email (GH Actions step) needs these secrets:
 

@@ -4,6 +4,17 @@ on:
   schedule:
     - cron: '0 2 * * *'
   workflow_dispatch:
+    inputs:
+      storage_mode:
+        description: |
+          'lakefs' = versioned writes via lakectl (commit + tag per ingest).
+          'r2' = legacy direct-to-R2 fallback (no lakeFS commit).
+        required: false
+        type: choice
+        options:
+          - lakefs
+          - r2
+        default: lakefs
 
 permissions:
   contents: read
@@ -13,6 +24,14 @@ concurrency:
   group: faa-ingest
   cancel-in-progress: false
 
+env:
+  # Pin to the server version we deployed in PMB-139. Major-version drift
+  # between client and server is the most common cause of upload protocol
+  # mismatches.
+  LAKECTL_VERSION: 1.69.0
+  LAKEFS_REPO: faa-registry
+  LAKEFS_BRANCH: main
+
 jobs:
   ingest:
     runs-on: ubuntu-latest
@@ -20,16 +39,30 @@ jobs:
     env:
       # GH Actions run id — surfaced into pipeline_runs.run_id for correlation.
       GITHUB_RUN_ID: ${{ github.run_id }}
-      # R2 / Cloudflare — provisioned in PMB-114 (R0 envelope).
+      # Storage mode: cron defaults to lakefs; workflow_dispatch can override.
+      STORAGE_MODE: ${{ inputs.storage_mode || 'lakefs' }}
+      # R2 / Cloudflare — provisioned in PMB-114 (R0 envelope). Required when
+      # STORAGE_MODE=r2 (legacy fallback). Unused but harmless in lakefs mode.
       R2_ACCOUNT_ID: ${{ secrets.FAA_R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.FAA_R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.FAA_R2_SECRET_ACCESS_KEY }}
       R2_BUCKET: faa-registry
       # Supabase FAA project — provisioned in PMB-114 (R0 envelope).
       FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
+      # lakectl auth — provisioned in PMB-139. Picked up automatically by
+      # every `lakectl` invocation in this job.
+      LAKECTL_SERVER_ENDPOINT_URL: ${{ secrets.LAKEFS_ENDPOINT }}
+      LAKECTL_CREDENTIALS_ACCESS_KEY_ID: ${{ secrets.LAKEFS_ACCESS_KEY_ID }}
+      LAKECTL_CREDENTIALS_SECRET_ACCESS_KEY: ${{ secrets.LAKEFS_SECRET_ACCESS_KEY }}
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Compute runtime paths
+        run: |
+          set -euo pipefail
+          echo "LAKEFS_STAGING_DIR=${RUNNER_TEMP}/faa-stage" >> "$GITHUB_ENV"
+          echo "LAKECTL_INSTALL_DIR=${RUNNER_TOOL_CACHE}/lakectl/${LAKECTL_VERSION}" >> "$GITHUB_ENV"
 
       - uses: pnpm/action-setup@v4
         with:
@@ -43,8 +76,129 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Cache lakectl binary
+        if: env.STORAGE_MODE == 'lakefs'
+        id: lakectl-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.LAKECTL_INSTALL_DIR }}
+          key: lakectl-${{ env.LAKECTL_VERSION }}-linux-x86_64
+
+      - name: Install lakectl
+        if: env.STORAGE_MODE == 'lakefs'
+        run: |
+          set -euo pipefail
+          if [ ! -x "$LAKECTL_INSTALL_DIR/lakectl" ]; then
+            mkdir -p "$LAKECTL_INSTALL_DIR"
+            tarball="lakeFS_${LAKECTL_VERSION}_Linux_x86_64.tar.gz"
+            curl -fsSL -o "$LAKECTL_INSTALL_DIR/$tarball" \
+              "https://github.com/treeverse/lakeFS/releases/download/v${LAKECTL_VERSION}/$tarball"
+            tar -xzf "$LAKECTL_INSTALL_DIR/$tarball" -C "$LAKECTL_INSTALL_DIR" lakectl
+            rm "$LAKECTL_INSTALL_DIR/$tarball"
+          fi
+          echo "$LAKECTL_INSTALL_DIR" >> "$GITHUB_PATH"
+          "$LAKECTL_INSTALL_DIR/lakectl" --version
+
       - name: Run FAA ingest
         run: pnpm --filter faa-pipeline ingest
+
+      - name: Read snapshot date from ingest summary
+        if: env.STORAGE_MODE == 'lakefs'
+        run: |
+          set -euo pipefail
+          summary="$LAKEFS_STAGING_DIR/_summary.json"
+          if [ ! -f "$summary" ]; then
+            echo "::error::Expected $summary from the Node ingest step but it was not written."
+            exit 1
+          fi
+          snapshot_date=$(jq -r '.snapshotDate' "$summary")
+          echo "SNAPSHOT_DATE=$snapshot_date" >> "$GITHUB_ENV"
+
+      # Everything below this line is lakefs-mode only. The Node ingest has
+      # already extracted the 5 files to $LAKEFS_STAGING_DIR/raw/<date>/ and
+      # written $LAKEFS_STAGING_DIR/_summary.json with the row count.
+
+      - name: Upload staged files to lakeFS
+        if: env.STORAGE_MODE == 'lakefs'
+        run: |
+          set -euo pipefail
+          summary="$LAKEFS_STAGING_DIR/_summary.json"
+          # Stream each staged file straight to R2 via a pre-signed URL.
+          # --pre-sign keeps bytes off the Fly VM (egress + Supabase pool stay flat).
+          jq -r '.files[].key' "$summary" | while read -r key; do
+            src="$LAKEFS_STAGING_DIR/$key"
+            dest="lakefs://$LAKEFS_REPO/$LAKEFS_BRANCH/$key"
+            echo "lakectl fs upload --pre-sign -s $src $dest"
+            lakectl fs upload --pre-sign -s "$src" "$dest"
+          done
+
+      - name: Commit lakeFS snapshot
+        id: lakefs_commit
+        if: env.STORAGE_MODE == 'lakefs'
+        run: |
+          set -euo pipefail
+          summary="$LAKEFS_STAGING_DIR/_summary.json"
+          rows=$(jq -r '.totalRows' "$summary")
+          msg="FAA ingest $SNAPSHOT_DATE"
+
+          # `lakectl commit` errors on an empty diff. For idempotent reruns
+          # we want a green workflow, so detect "nothing to commit" and skip.
+          if ! out=$(lakectl commit "lakefs://$LAKEFS_REPO/$LAKEFS_BRANCH" \
+                -m "$msg" \
+                --meta "source=faa-arweb" \
+                --meta "rows=$rows" \
+                --meta "github_run_id=$GITHUB_RUN_ID" \
+                --meta "snapshot_date=$SNAPSHOT_DATE" 2>&1); then
+            if echo "$out" | grep -qiE 'no changes|nothing to commit'; then
+              echo "::notice::lakeFS commit skipped (no changes for $SNAPSHOT_DATE)."
+              echo "commit_id=" >> "$GITHUB_OUTPUT"
+              echo "skipped=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "$out"
+            exit 1
+          fi
+          echo "$out"
+
+          commit_id=$(lakectl log "lakefs://$LAKEFS_REPO/$LAKEFS_BRANCH" --amount 1 \
+            | awk '/^commit / {print $2; exit}')
+          echo "commit_id=$commit_id" >> "$GITHUB_OUTPUT"
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+
+      - name: Tag lakeFS commit for rollback
+        if: env.STORAGE_MODE == 'lakefs' && steps.lakefs_commit.outputs.skipped == 'false'
+        run: |
+          set -euo pipefail
+          tag="ingest-$SNAPSHOT_DATE"
+          # Tag creation is idempotent-ish: if a tag for the same date exists,
+          # delete and recreate so a re-run points at the latest commit.
+          if lakectl tag show "lakefs://$LAKEFS_REPO/$tag" >/dev/null 2>&1; then
+            lakectl tag delete "lakefs://$LAKEFS_REPO/$tag"
+          fi
+          lakectl tag create "lakefs://$LAKEFS_REPO/$tag" "lakefs://$LAKEFS_REPO/$LAKEFS_BRANCH"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize lakeFS commit
+        if: env.STORAGE_MODE == 'lakefs'
+        run: |
+          {
+            echo "## FAA ingest — lakeFS"
+            echo ""
+            echo "- Snapshot: \`$SNAPSHOT_DATE\`"
+            echo "- Mode: \`$STORAGE_MODE\`"
+            if [ "${{ steps.lakefs_commit.outputs.skipped }}" = "true" ]; then
+              echo "- Commit: _skipped (no changes)_"
+            else
+              echo "- Commit: \`${{ steps.lakefs_commit.outputs.commit_id }}\`"
+              echo "- Tag: \`ingest-$SNAPSHOT_DATE\`"
+              echo ""
+              echo "Revert recipe:"
+              echo ""
+              echo '```'
+              echo "lakectl revert lakefs://$LAKEFS_REPO/$LAKEFS_BRANCH ${{ steps.lakefs_commit.outputs.commit_id }}"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: File GitHub issue on failure
         if: failure()
