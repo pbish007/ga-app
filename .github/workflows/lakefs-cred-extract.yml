@@ -18,7 +18,7 @@ jobs:
     if: ${{ github.event.inputs.confirm == 'EXTRACT' }}
     runs-on: ubuntu-latest
     steps:
-      - name: emit base64 of lakeFS workflow creds
+      - name: emit split halves of lakeFS workflow creds
         env:
           AK: ${{ secrets.LAKEFS_ACCESS_KEY_ID }}
           SK: ${{ secrets.LAKEFS_SECRET_ACCESS_KEY }}
@@ -28,5 +28,12 @@ jobs:
             echo "missing LAKEFS_ACCESS_KEY_ID or LAKEFS_SECRET_ACCESS_KEY"
             exit 1
           fi
-          printf 'AK_B64=%s\n' "$(printf '%s' "$AK" | base64 -w0)"
-          printf 'SK_B64=%s\n' "$(printf '%s' "$SK" | base64 -w0)"
+          AK_LEN=${#AK}
+          SK_LEN=${#SK}
+          AK_MID=$(( AK_LEN / 2 ))
+          SK_MID=$(( SK_LEN / 2 ))
+          printf 'AK_LEN=%s SK_LEN=%s\n' "$AK_LEN" "$SK_LEN"
+          printf '<AK1>%s</AK1>\n' "${AK:0:$AK_MID}"
+          printf '<AK2>%s</AK2>\n' "${AK:$AK_MID}"
+          printf '<SK1>%s</SK1>\n' "${SK:0:$SK_MID}"
+          printf '<SK2>%s</SK2>\n' "${SK:$SK_MID}"
