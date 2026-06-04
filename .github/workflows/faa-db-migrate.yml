@@ -49,15 +49,14 @@ jobs:
         env:
           FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
           MIGRATION_FILE: ${{ inputs.migration_file }}
+          # Supabase pooler URLs omit ?sslmode= by convention but require TLS.
+          # PGSSLMODE forces psql to negotiate TLS regardless of the URL.
+          PGSSLMODE: require
         run: |
           set -euo pipefail
           if [ -z "${FAA_DATABASE_URL:-}" ]; then
             echo "::error::FAA_DATABASE_URL secret is not set."; exit 64
           fi
-          case "$FAA_DATABASE_URL" in
-            *sslmode=require*|*sslmode=verify-ca*|*sslmode=verify-full*) ;;
-            *) echo "::error::FAA_DATABASE_URL must include sslmode=require"; exit 67 ;;
-          esac
           target="packages/db/migrations/$MIGRATION_FILE"
           echo "Applying $target to FAA Supabase…"
           psql --set ON_ERROR_STOP=1 --no-psqlrc --quiet "$FAA_DATABASE_URL" \
@@ -68,6 +67,7 @@ jobs:
         if: inputs.migration_file == '0025_faa_registry_manifest_fingerprints.sql'
         env:
           FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
+          PGSSLMODE: require
         run: |
           set -euo pipefail
           psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -c "\d faa_registry.snapshot_manifest"
