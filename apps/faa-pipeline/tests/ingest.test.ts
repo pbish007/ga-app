@@ -1,6 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { runPipeline } from "../src/ingest.js";
 import { FAA_FILES, rawKey, type FaaFile } from "../src/lib/config.js";
+import { makeLakeFsStagingClient } from "../src/lib/lakefs.js";
 import type { R2Client } from "../src/lib/r2.js";
 import type { PipelineDb } from "../src/lib/db.js";
 import type { DownloadResult } from "../src/lib/download.js";
@@ -11,6 +15,7 @@ function baseConfig() {
   return {
     snapshotDate: SNAPSHOT_DATE,
     zipUrl: "https://faa.test/ReleasableAircraft.zip",
+    storageMode: "r2" as const,
     r2: {
       accountId: "acct",
       accessKeyId: "ak",
@@ -18,6 +23,7 @@ function baseConfig() {
       bucket: "faa-registry",
       endpoint: "https://acct.r2.cloudflarestorage.com",
     },
+    lakefs: { stagingDir: "/tmp/faa-stage-test" },
     databaseUrl: "postgres://test",
     runId: "test-run-1",
   };
@@ -206,5 +212,77 @@ describe("runPipeline", () => {
     expect(status).toBe("failed");
     expect(msg).toMatch(/boom: FAA 503/);
     expect(dbm.upserts).toBe(0);
+  });
+});
+
+describe("runPipeline (lakefs mode, PMB-144)", () => {
+  const stagingDirs: string[] = [];
+  afterEach(() => {
+    for (const d of stagingDirs.splice(0)) {
+      try {
+        rmSync(d, { recursive: true, force: true });
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+  });
+
+  function lakefsConfig() {
+    const dir = mkdtempSync(join(tmpdir(), "faa-stage-test-"));
+    stagingDirs.push(dir);
+    return {
+      ...baseConfig(),
+      storageMode: "lakefs" as const,
+      lakefs: { stagingDir: dir },
+    };
+  }
+
+  it("stages all 5 files to disk and writes a _summary.json with totalRows", async () => {
+    const cfg = lakefsConfig();
+    const dbm = makeDbMock(false);
+    const storage = makeLakeFsStagingClient(cfg.lakefs.stagingDir);
+    const download = vi.fn(async () => fakeDownload());
+
+    const out = await runPipeline(cfg, {
+      db: dbm.db,
+      r2: storage,
+      download,
+      log: () => {},
+    });
+
+    expect(out.skipped).toBe(false);
+
+    // Files are written under <stagingDir>/raw/<date>/<FILE>.txt.
+    for (const f of FAA_FILES) {
+      const p = join(cfg.lakefs.stagingDir, rawKey(SNAPSHOT_DATE, f));
+      expect(existsSync(p)).toBe(true);
+    }
+
+    const summary = JSON.parse(
+      readFileSync(join(cfg.lakefs.stagingDir, "_summary.json"), "utf8"),
+    );
+    expect(summary.snapshotDate).toBe(SNAPSHOT_DATE);
+    expect(summary.files).toHaveLength(5);
+    expect(summary.totalRows).toBe(10); // 2 data rows per file × 5 files
+    expect(dbm.upserts).toBe(1);
+  });
+
+  it("does NOT skip on a manifest-only re-run (lakeFS commits are authoritative, not the DB row)", async () => {
+    const cfg = lakefsConfig();
+    const dbm = makeDbMock(true); // manifest already present
+    const storage = makeLakeFsStagingClient(cfg.lakefs.stagingDir);
+    const download = vi.fn(async () => fakeDownload());
+
+    const out = await runPipeline(cfg, {
+      db: dbm.db,
+      r2: storage,
+      download,
+      log: () => {},
+    });
+
+    expect(out.skipped).toBe(false);
+    expect(download).toHaveBeenCalledOnce();
+    // _summary.json must be written so the workflow's lakectl step has work.
+    expect(existsSync(join(cfg.lakefs.stagingDir, "_summary.json"))).toBe(true);
   });
 });
