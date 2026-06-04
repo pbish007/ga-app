@@ -7,10 +7,14 @@ name: lakeFS FAA — deploy (Fly.io)
 # Required GitHub secrets:
 #   FLY_API_TOKEN                       deploy token from `fly tokens create deploy`
 #   FAA_R2_ACCOUNT_ID                   already set (PMB-114)
+#   FAA_DATABASE_URL                    already set (PMB-114) — txn-mode pooler URL
+#                                       with search_path=faa_registry. The deploy step
+#                                       derives the lakeFS connection string from this
+#                                       by swapping port 6543→5432 and dropping the
+#                                       search_path option, so a separate LAKEFS_DATABASE_URL
+#                                       is NOT needed.
 #   LAKEFS_R2_ACCESS_KEY_ID             new R2 token scoped to bucket faa-registry
 #   LAKEFS_R2_SECRET_ACCESS_KEY         secret half of the above
-#   LAKEFS_DATABASE_URL                 Supabase session-mode URL for the lakefs schema
-#                                       (postgres user, port 5432, no search_path)
 #   LAKEFS_AUTH_ENCRYPT_SECRET_KEY      32 random bytes, e.g. `openssl rand -hex 32`
 
 on:
@@ -71,22 +75,30 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           FAA_R2_ACCOUNT_ID: ${{ secrets.FAA_R2_ACCOUNT_ID }}
+          FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
           LAKEFS_R2_ACCESS_KEY_ID: ${{ secrets.LAKEFS_R2_ACCESS_KEY_ID }}
           LAKEFS_R2_SECRET_ACCESS_KEY: ${{ secrets.LAKEFS_R2_SECRET_ACCESS_KEY }}
-          LAKEFS_DATABASE_URL: ${{ secrets.LAKEFS_DATABASE_URL }}
           LAKEFS_AUTH_ENCRYPT_SECRET_KEY: ${{ secrets.LAKEFS_AUTH_ENCRYPT_SECRET_KEY }}
         run: |
           set -euo pipefail
-          for var in FAA_R2_ACCOUNT_ID LAKEFS_R2_ACCESS_KEY_ID LAKEFS_R2_SECRET_ACCESS_KEY LAKEFS_DATABASE_URL LAKEFS_AUTH_ENCRYPT_SECRET_KEY; do
+          for var in FAA_R2_ACCOUNT_ID FAA_DATABASE_URL LAKEFS_R2_ACCESS_KEY_ID LAKEFS_R2_SECRET_ACCESS_KEY LAKEFS_AUTH_ENCRYPT_SECRET_KEY; do
             if [ -z "${!var:-}" ]; then
               echo "::error::secret $var is empty"; exit 64
             fi
           done
+
+          # Derive the lakeFS Supabase connection from FAA_DATABASE_URL: same project,
+          # session-mode pooler (port 5432 instead of 6543), no search_path option.
+          # Mask before any echo so the URL never appears in workflow logs.
+          lakefs_db="${FAA_DATABASE_URL%%\?*}"
+          lakefs_db="${lakefs_db/:6543\//:5432/}"
+          echo "::add-mask::$lakefs_db"
+
           flyctl secrets set \
             --app "$FLY_APP" \
             --stage \
             "LAKEFS_DATABASE_TYPE=postgres" \
-            "LAKEFS_DATABASE_POSTGRES_CONNECTION_STRING=$LAKEFS_DATABASE_URL" \
+            "LAKEFS_DATABASE_POSTGRES_CONNECTION_STRING=$lakefs_db" \
             "LAKEFS_BLOCKSTORE_TYPE=s3" \
             "LAKEFS_BLOCKSTORE_S3_ENDPOINT=https://${FAA_R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
             "LAKEFS_BLOCKSTORE_S3_REGION=auto" \
