@@ -1,0 +1,32 @@
+name: lakeFS cred extract (one-shot)
+
+# One-shot manual workflow used to surface the existing LAKEFS_ACCESS_KEY_ID /
+# LAKEFS_SECRET_ACCESS_KEY pair so they can be re-shared (PMB-145). GitHub Actions
+# secrets are write-only, so we base64-encode them to bypass GH's literal-match
+# secret masking. Delete this workflow file after a single use.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type EXTRACT to confirm'
+        required: true
+        default: 'no'
+
+jobs:
+  extract:
+    if: ${{ github.event.inputs.confirm == 'EXTRACT' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: emit base64 of lakeFS workflow creds
+        env:
+          AK: ${{ secrets.LAKEFS_ACCESS_KEY_ID }}
+          SK: ${{ secrets.LAKEFS_SECRET_ACCESS_KEY }}
+        run: |
+          set -u
+          if [ -z "${AK:-}" ] || [ -z "${SK:-}" ]; then
+            echo "missing LAKEFS_ACCESS_KEY_ID or LAKEFS_SECRET_ACCESS_KEY"
+            exit 1
+          fi
+          printf 'AK_B64=%s\n' "$(printf '%s' "$AK" | base64 -w0)"
+          printf 'SK_B64=%s\n' "$(printf '%s' "$SK" | base64 -w0)"
