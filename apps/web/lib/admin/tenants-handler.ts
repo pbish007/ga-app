@@ -48,13 +48,28 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Admin routes share one deps shape. The `db` here is the bare runtime
- * handle — NOT a tenant-scoped tx — because admin routes operate cross
- * tenant and the audit table is granted only to the bare runtime role
- * (see migration 0024). The handlers never enter `runAsTenant`.
+ * Admin routes share one deps shape.
+ *
+ * `db` is the bare runtime (`tenant_runtime`) handle — used for the
+ * platform-admin gate (`platform_admins`, granted in 0023) and the
+ * `tenant_provisioning_audit` reads/writes (granted in 0024), plus the
+ * `TenantProvisioningService` which manages its own role switches.
+ *
+ * `directDb` is the owner-class connection (`DATABASE_URL_DIRECT` →
+ * `neondb_owner`, BYPASSRLS — see `getDirectDb` in `apps/web/lib/db.ts`).
+ * Cross-tenant admin reads of `organization_memberships` go here because
+ * `tenant_runtime` either lacks the SELECT grant (errors) or, with the
+ * grant added, hits FORCE-RLS and silently returns zero rows. Admin
+ * routes are explicitly cross-tenant and never set a tenant GUC, so the
+ * BYPASSRLS path is the correct mechanism (same pattern as the
+ * notifications sweep, `apps/web/app/api/cron/notifications/route.ts`).
+ *
+ * In pglite tests both fields point at the same handle.
  */
 export interface AdminTenantsDeps {
   db: AccountsDb;
+  /** Owner-class (BYPASSRLS) connection for cross-tenant reads. */
+  directDb: AccountsDb;
   /** Session HMAC secret. Same value used by login + signup. */
   secret: string;
   /** Origin used to build invite accept URLs (e.g. https://app.example). */
@@ -490,7 +505,11 @@ export async function handleListTenants(
   const ctx = await gate(req, deps);
   if (ctx instanceof Response) return ctx;
 
-  const rows = await deps.db
+  // Cross-tenant read — use the owner-class direct connection. The bare
+  // tenant_runtime handle would either lack the grant on
+  // organization_memberships (errors) or hit FORCE-RLS without a GUC set
+  // (silently empty). See AdminTenantsDeps for the rationale.
+  const rows = await deps.directDb
     .select({
       id: organizations.id,
       name: organizations.name,
@@ -505,11 +524,7 @@ export async function handleListTenants(
     return NextResponse.json({ tenants: [] });
   }
 
-  // Per-tenant member counts + primary admin email. One query for counts +
-  // one for the primary admins keeps this O(2) reads regardless of tenant
-  // count. The "primary admin" is the earliest-created membership with
-  // role=admin — a deterministic proxy for "the one we created at signup".
-  const memberCountsRaw = await deps.db
+  const memberCountsRaw = await deps.directDb
     .select({
       tenantId: organizationMemberships.tenantId,
       total: sql<string>`count(*)::text`,
@@ -531,7 +546,7 @@ export async function handleListTenants(
   // per tenant. With one admin per tenant in the canonical case this is
   // one row per tenant; even with multiple admins, the loop preserves the
   // earliest one (the original primary).
-  const adminRows = await deps.db
+  const adminRows = await deps.directDb
     .select({
       tenantId: organizationMemberships.tenantId,
       email: users.email,
@@ -582,7 +597,9 @@ export async function handleGetTenant(
     });
   }
 
-  const [tenant] = await deps.db
+  // Cross-tenant admin read — see AdminTenantsDeps for why this goes
+  // through the BYPASSRLS direct connection.
+  const [tenant] = await deps.directDb
     .select()
     .from(organizations)
     .where(eq(organizations.id, params.id))
@@ -594,7 +611,7 @@ export async function handleGetTenant(
     });
   }
 
-  const memberships = await deps.db
+  const memberships = await deps.directDb
     .select({
       userId: organizationMemberships.userId,
       role: organizationMemberships.role,
@@ -605,6 +622,9 @@ export async function handleGetTenant(
     .innerJoin(users, eq(users.id, organizationMemberships.userId))
     .where(eq(organizationMemberships.tenantId, params.id));
 
+  // The audit table is granted to tenant_runtime (0024) and has no RLS,
+  // so this read works on either handle; keeping it on `db` for
+  // consistency with `handleListAudit` and `handleCreateTenant`.
   const audit = await deps.db
     .select({
       id: tenantProvisioningAudit.id,
@@ -744,7 +764,12 @@ export async function handleReseedDemo(
     });
   }
 
-  const [tenant] = await deps.db
+  // Cross-tenant admin read + tenant-scoped write — both via the
+  // BYPASSRLS direct connection. `seedDemoContent` writes to tenant
+  // tables (aircraft / subscriptions / squawks / entries) without
+  // entering a tenant tx, so it needs the owner-class handle for those
+  // writes too. See AdminTenantsDeps.
+  const [tenant] = await deps.directDb
     .select({ id: organizations.id, regimeId: organizations.defaultRegimeId })
     .from(organizations)
     .where(eq(organizations.id, params.id))
@@ -756,13 +781,7 @@ export async function handleReseedDemo(
     });
   }
 
-  // Look up the earliest admin membership — the "primary admin" we seed
-  // entries against. Required for entries that need an author/signer/pilot
-  // user id, but the demo content we seed today only needs an aircraft +
-  // subscriptions + an open squawk + a draft maintenance entry; the user
-  // id falls out as the primary admin so the squawk has a reporter and
-  // the draft entry has no signer.
-  const [primaryAdmin] = await deps.db
+  const [primaryAdmin] = await deps.directDb
     .select({ userId: organizationMemberships.userId })
     .from(organizationMemberships)
     .where(
@@ -782,7 +801,7 @@ export async function handleReseedDemo(
   }
 
   const result = await seedDemoContent({
-    db: deps.db,
+    db: deps.directDb,
     tenantId: params.id,
     regimeId: tenant.regimeId,
     reporterUserId: primaryAdmin.userId,

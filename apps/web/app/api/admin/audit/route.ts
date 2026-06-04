@@ -1,5 +1,5 @@
 import { handleListAudit } from "../../../../lib/admin/tenants-handler";
-import { getDb } from "../../../../lib/db";
+import { getDb, getDirectDb } from "../../../../lib/db";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,7 +11,7 @@ function buildDeps() {
     process.env.INVITE_ACCEPT_URL_BASE ??
     process.env.NEXT_PUBLIC_APP_URL ??
     "https://ga-app-taupe.vercel.app/invitations";
-  return { db: getDb(), secret, acceptUrlBase };
+  return { db: getDb(), directDb: getDirectDb(), secret, acceptUrlBase };
 }
 
 export async function GET(request: Request): Promise<Response> {

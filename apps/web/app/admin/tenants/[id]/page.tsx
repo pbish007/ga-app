@@ -5,7 +5,7 @@ import { asc, desc, eq, inArray } from "drizzle-orm";
 import { schema as dbSchema, type OrgType } from "@ga/db";
 
 import { isPlatformAdmin } from "../../../../lib/auth/platform-admin";
-import { getDb } from "../../../../lib/db";
+import { getDb, getDirectDb } from "../../../../lib/db";
 import { getOptionalSession } from "../../../../lib/page-auth";
 import { pageShellStyles as s } from "../../../../lib/page-shell";
 import { DEMO_ORG_NAME } from "../../../../lib/demo-seed";
@@ -60,8 +60,11 @@ export default async function AdminTenantDetailPage({
   const db = getDb();
   const ok = await isPlatformAdmin(session.user.id, { db });
   if (!ok) redirect("/orgs");
+  // Cross-tenant admin reads — owner-class connection (same rationale as
+  // `apps/web/lib/admin/tenants-handler.ts`).
+  const directDb = getDirectDb();
 
-  const [tenant] = await db
+  const [tenant] = await directDb
     .select({
       id: organizations.id,
       name: organizations.name,
@@ -90,7 +93,7 @@ export default async function AdminTenantDetailPage({
       )[0]
     : null;
 
-  const memberships = await db
+  const memberships = await directDb
     .select({
       userId: organizationMemberships.userId,
       role: organizationMemberships.role,

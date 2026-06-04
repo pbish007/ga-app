@@ -90,8 +90,14 @@ async function seed(): Promise<Seed> {
 }
 
 function deps(): AdminTenantsDeps {
+  // In pglite tests there's a single connection — `db` and `directDb`
+  // point at the same handle. Production routes pass `getDirectDb()` for
+  // `directDb` (BYPASSRLS owner connection) so the cross-tenant reads
+  // see all tenants. See AdminTenantsDeps in
+  // `apps/web/lib/admin/tenants-handler.ts`.
   return {
     db,
+    directDb: db,
     secret: SECRET,
     acceptUrlBase: "https://app.example.test/invitations",
   };

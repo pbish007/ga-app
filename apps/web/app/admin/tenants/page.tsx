@@ -9,7 +9,7 @@ import {
 } from "@ga/db";
 
 import { isPlatformAdmin } from "../../../lib/auth/platform-admin";
-import { getDb } from "../../../lib/db";
+import { getDb, getDirectDb } from "../../../lib/db";
 import { getOptionalSession } from "../../../lib/page-auth";
 import { pageShellStyles as s } from "../../../lib/page-shell";
 
@@ -48,6 +48,11 @@ export default async function AdminTenantsListPage({
   const db = getDb();
   const ok = await isPlatformAdmin(session.user.id, { db });
   if (!ok) redirect("/orgs");
+  // Cross-tenant admin reads — go through the owner-class connection so
+  // `organization_memberships` (FORCE-RLS, not granted to tenant_runtime)
+  // is visible. Same pattern as the API handler in
+  // `apps/web/lib/admin/tenants-handler.ts`.
+  const directDb = getDirectDb();
 
   const sp = (await searchParams) as Search;
   const orgTypeFilter = isOrgType(sp.orgType) ? sp.orgType : undefined;
@@ -78,7 +83,7 @@ export default async function AdminTenantsListPage({
         ? conditions[0]
         : and(...conditions);
 
-  const tenantRowsQuery = db
+  const tenantRowsQuery = directDb
     .select({
       id: organizations.id,
       name: organizations.name,
@@ -92,7 +97,7 @@ export default async function AdminTenantsListPage({
     ? await tenantRowsQuery.where(whereExpr)
     : await tenantRowsQuery;
 
-  const memberCountsRaw = await db
+  const memberCountsRaw = await directDb
     .select({
       tenantId: organizationMemberships.tenantId,
       total: sql<string>`count(*)::text`,
@@ -108,7 +113,7 @@ export default async function AdminTenantsListPage({
     });
   }
 
-  const adminRows = await db
+  const adminRows = await directDb
     .select({
       tenantId: organizationMemberships.tenantId,
       email: users.email,
