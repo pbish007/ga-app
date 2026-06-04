@@ -9,9 +9,10 @@ It is the PMB-62 deliverable that replaces two stop-gaps used during the MVP
 front-door push:
 
 - pasting a Neon key into an issue comment to run `migrate.sh` from a dev box, and
-- runtime admin DDL endpoints (`POST /api/admin/run-migrations` and
-  `POST /api/admin/bootstrap-demo`, both retired — the latter in PMB-62 after
-  PMB-60 demo sign-off).
+- runtime admin DDL endpoints (`POST /api/admin/run-migrations` and the
+  one-shot demo-bootstrap admin endpoint, both retired — the latter in
+  PMB-62 after PMB-60 demo sign-off; the standing replacement is the admin
+  tenant API described in §4).
 
 > **Current status (2026-06-03):** the GitHub Actions path in §2 is the live
 > canonical path — the `DATABASE_URL_DIRECT` GH Actions secret is set. Use it
@@ -81,19 +82,32 @@ so it belongs in GitHub Actions secrets — masked, write-only, never echoed.
 > **Do not paste this value into an issue comment.** A standing DB credential
 > can't be cleanly revoked the way a short-lived Neon API key can.
 
-## 4. Demo data (re)seeding
+## 4. Demo data (re)seeding (V1: admin API)
 
-Schema migrations never seed data. The board-acceptance demo org ("Blue Sky
-Aviation (Demo)", PMB-60) is seeded separately by the idempotent library
-`apps/web/lib/demo-seed.ts` (`bootstrapAndSeed`). It deletes and recreates only
-the demo org/users, so its blast radius is the demo org alone.
+Schema migrations never seed data. The board-acceptance demo content
+("Blue Sky Aviation (Demo)", PMB-60) is seeded per-tenant by the idempotent
+library `apps/web/lib/demo-seed.ts` (`seedDemoContent`), driven by the
+admin API:
 
-Re-seed via the **DB seed demo (production)** workflow (manual dispatch,
-requires typing the confirmation input). It runs the same library against
-`DATABASE_URL_DIRECT` — so, like §2, it only works once that secret is set.
-Until then, the live `bootstrap-demo` endpoint is the working reseed path. This
-is a developer/demo convenience, not a production data path — production tenants
-create their own data through the app.
+1. Create the demo tenant (org + primary admin user) via
+   `POST /api/admin/tenants` — primary admins use the admin UI at
+   `/admin/tenants/new`.
+2. (Re)seed the canonical demo aircraft + subscriptions + open squawk +
+   draft maintenance entry into that tenant via
+   `POST /api/admin/tenants/:id/reseed-demo` — exposed in the admin UI as
+   the **Reseed demo content** button on `/admin/tenants/:id`. The button
+   is gated client-side to tenants whose org name matches `DEMO_ORG_NAME`
+   ("Blue Sky Aviation (Demo)") or ends in `(Demo)`.
+
+Both routes require a `requirePlatformAdmin` session. Re-running the
+reseed deletes the tenant's aircraft (cascading to subscriptions, flight
+time, squawks, maintenance entries) and re-inserts the canonical demo
+shape — blast radius is the single tenant, not the whole database. This
+is a developer/demo convenience; production tenants create their own
+data through the normal app surfaces.
+
+The pre-V1 path — the `DB seed demo (production)` GH workflow + the
+one-shot `bootstrap-demo` admin endpoint — is retired (PMB-120, PMB-62).
 
 ## 5. Runtime env wiring — `DATABASE_URL` parity across Preview + Production (PMB-131)
 
@@ -219,8 +233,10 @@ is the only mitigation.
   see the PMB-62 `security-review` document.
 - `POST /api/admin/bootstrap-demo` + `ADMIN_BOOTSTRAP_TOKEN` are **retired**
   (PMB-62, after PMB-60 demo sign-off and the SecurityEngineer review on
-  PMB-73). Route deleted; Vercel env var removed. The remaining seed path is
-  the `DB seed demo (production)` workflow (§4), which requires the secret
-  from §3 to be set.
+  PMB-73). Route deleted; Vercel env var removed.
+- The `DB seed demo (production)` GH workflow + the
+  `apps/web/scripts/seed-demo.mjs` runner that backed it are **retired**
+  (PMB-120, V1 managed onboarding). Replacement: the admin
+  `POST /api/admin/tenants/:id/reseed-demo` route (§4).
 
 Related: `docs/runbooks/postgres-restore.md`.

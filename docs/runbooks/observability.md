@@ -22,7 +22,6 @@ base grows.
 - `.github/workflows/db-migrate.yml` — production DB migrations.
 - `.github/workflows/deploy-prod.yml` — manual prod deploy fallback (the native
   Vercel→GitHub integration in PMB-57 is the primary path).
-- `.github/workflows/db-seed-demo.yml` — guarded reseed of the demo org.
 
 **What fires it**
 
@@ -62,7 +61,7 @@ Expected outcome: a new issue is filed within ~30s, the CEO inbox receives the
 notification email, and no database writes occurred. Close the issue once
 verified.
 
-For the other two workflows there is no synthetic mode (they are short enough
+For the deploy workflow there is no synthetic mode (it is short enough
 that a real run is the test); broken-image-build verification is left to the
 Vercel signal in §2.
 
