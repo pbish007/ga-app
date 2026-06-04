@@ -99,6 +99,8 @@ jobs:
             --stage \
             "LAKEFS_DATABASE_TYPE=postgres" \
             "LAKEFS_DATABASE_POSTGRES_CONNECTION_STRING=$lakefs_db" \
+            "LAKEFS_DATABASE_POSTGRES_MAX_OPEN_CONNECTIONS=5" \
+            "LAKEFS_DATABASE_POSTGRES_MAX_IDLE_CONNECTIONS=2" \
             "LAKEFS_BLOCKSTORE_TYPE=s3" \
             "LAKEFS_BLOCKSTORE_S3_ENDPOINT=https://${FAA_R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
             "LAKEFS_BLOCKSTORE_S3_REGION=auto" \

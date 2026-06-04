@@ -39,5 +39,6 @@ Provisioned per [PMB-139](../../) (DevOps).
 
 - **Rotate R2**: revoke + recreate the token in Cloudflare, update `LAKEFS_R2_*` GH secrets, re-dispatch `lakefs-faa-deploy`.
 - **Rotate Postgres**: `alter user postgres password '…';` on Supabase, update `FAA_DATABASE_URL` GH secret (the lakeFS connection is derived from it), re-dispatch.
-- **Rotate lakeFS access key**: in the lakeFS UI, create a new key, update `LAKEFS_ACCESS_KEY_ID` / `LAKEFS_SECRET_ACCESS_KEY` GH secrets, delete the old key.
+- **Rotate lakeFS access key**: in the lakeFS UI, create a new key, update `LAKEFS_ACCESS_KEY_ID` / `LAKEFS_SECRET_ACCESS_KEY` GH secrets, delete the old key. (Each user is capped at 2 credentials, so revoke before minting if you're at the limit.)
+- **Supabase connection cap (this deploy)**: `LAKEFS_DATABASE_POSTGRES_MAX_OPEN_CONNECTIONS=5` and `LAKEFS_DATABASE_POSTGRES_MAX_IDLE_CONNECTIONS=2`. Supabase free-tier session-mode pooler caps at 15 clients per project; lakeFS's default of 25 trips that cap on boot. Don't raise these without upgrading the Supabase plan.
 - **Tear down**: `flyctl apps destroy lakefs-faa --yes` + `drop schema lakefs cascade;` on Supabase. R2 bucket is untouched. Direct-to-R2 ingest paths are unaffected throughout.
