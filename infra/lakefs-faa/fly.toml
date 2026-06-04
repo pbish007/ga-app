@@ -1,0 +1,42 @@
+# Fly.io config for the opensource lakeFS deployment that fronts the
+# Cloudflare R2 bucket `faa-registry`. Provisioned per PMB-139.
+#
+# Secrets (set via `flyctl secrets set` or the lakefs-faa-deploy.yml workflow):
+#   LAKEFS_DATABASE_TYPE=postgres
+#   LAKEFS_DATABASE_POSTGRES_CONNECTION_STRING=<Supabase session-mode URL, no search_path>
+#   LAKEFS_BLOCKSTORE_TYPE=s3
+#   LAKEFS_BLOCKSTORE_S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com
+#   LAKEFS_BLOCKSTORE_S3_REGION=auto
+#   LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE=true
+#   LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID=<R2 access key, lakefs-faa scoped>
+#   LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY=<R2 secret>
+#   LAKEFS_AUTH_ENCRYPT_SECRET_KEY=<32 random bytes, openssl rand -hex 32>
+
+app = "lakefs-faa"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+[[mounts]]
+  source = "lakefs_data"
+  destination = "/data"
+
+[[http_service.checks]]
+  grace_period = "30s"
+  interval = "30s"
+  method = "GET"
+  path = "/_health"
+  protocol = "http"
+  timeout = "5s"

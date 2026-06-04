@@ -1,0 +1,140 @@
+name: lakeFS FAA — deploy (Fly.io)
+
+# Deploy the opensource lakeFS app (infra/lakefs-faa) to Fly.io. Idempotent:
+# safe to re-dispatch to push a new image, rotate secrets, or recover after a
+# manual change in the Fly dashboard.
+#
+# Required GitHub secrets:
+#   FLY_API_TOKEN                       deploy token from `fly tokens create deploy`
+#   FAA_R2_ACCOUNT_ID                   already set (PMB-114)
+#   LAKEFS_R2_ACCESS_KEY_ID             new R2 token scoped to bucket faa-registry
+#   LAKEFS_R2_SECRET_ACCESS_KEY         secret half of the above
+#   LAKEFS_DATABASE_URL                 Supabase session-mode URL for the lakefs schema
+#                                       (postgres user, port 5432, no search_path)
+#   LAKEFS_AUTH_ENCRYPT_SECRET_KEY      32 random bytes, e.g. `openssl rand -hex 32`
+
+on:
+  workflow_dispatch:
+    inputs:
+      ensure_app:
+        description: 'Create the Fly app + volume if missing (first run only)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: lakefs-faa-deploy
+  cancel-in-progress: false
+
+env:
+  FLY_APP: lakefs-faa
+  FLY_REGION: iad
+  FLY_VOLUME: lakefs_data
+  FLY_VOLUME_SIZE_GB: '3'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Ensure Fly app + volume (first run)
+        if: inputs.ensure_app
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! flyctl status --app "$FLY_APP" >/dev/null 2>&1; then
+            echo "Creating Fly app $FLY_APP..."
+            flyctl apps create "$FLY_APP" --org personal
+          else
+            echo "Fly app $FLY_APP already exists."
+          fi
+          if ! flyctl volumes list --app "$FLY_APP" 2>/dev/null | grep -q "$FLY_VOLUME"; then
+            echo "Creating volume $FLY_VOLUME in $FLY_REGION ($FLY_VOLUME_SIZE_GB GB)..."
+            flyctl volumes create "$FLY_VOLUME" \
+              --app "$FLY_APP" \
+              --region "$FLY_REGION" \
+              --size "$FLY_VOLUME_SIZE_GB" \
+              --yes
+          else
+            echo "Volume $FLY_VOLUME already exists."
+          fi
+
+      - name: Set Fly secrets
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FAA_R2_ACCOUNT_ID: ${{ secrets.FAA_R2_ACCOUNT_ID }}
+          LAKEFS_R2_ACCESS_KEY_ID: ${{ secrets.LAKEFS_R2_ACCESS_KEY_ID }}
+          LAKEFS_R2_SECRET_ACCESS_KEY: ${{ secrets.LAKEFS_R2_SECRET_ACCESS_KEY }}
+          LAKEFS_DATABASE_URL: ${{ secrets.LAKEFS_DATABASE_URL }}
+          LAKEFS_AUTH_ENCRYPT_SECRET_KEY: ${{ secrets.LAKEFS_AUTH_ENCRYPT_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          for var in FAA_R2_ACCOUNT_ID LAKEFS_R2_ACCESS_KEY_ID LAKEFS_R2_SECRET_ACCESS_KEY LAKEFS_DATABASE_URL LAKEFS_AUTH_ENCRYPT_SECRET_KEY; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::secret $var is empty"; exit 64
+            fi
+          done
+          flyctl secrets set \
+            --app "$FLY_APP" \
+            --stage \
+            "LAKEFS_DATABASE_TYPE=postgres" \
+            "LAKEFS_DATABASE_POSTGRES_CONNECTION_STRING=$LAKEFS_DATABASE_URL" \
+            "LAKEFS_BLOCKSTORE_TYPE=s3" \
+            "LAKEFS_BLOCKSTORE_S3_ENDPOINT=https://${FAA_R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            "LAKEFS_BLOCKSTORE_S3_REGION=auto" \
+            "LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE=true" \
+            "LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID=$LAKEFS_R2_ACCESS_KEY_ID" \
+            "LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY=$LAKEFS_R2_SECRET_ACCESS_KEY" \
+            "LAKEFS_AUTH_ENCRYPT_SECRET_KEY=$LAKEFS_AUTH_ENCRYPT_SECRET_KEY"
+
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        working-directory: infra/lakefs-faa
+        run: |
+          set -euo pipefail
+          flyctl deploy --app "$FLY_APP" --remote-only
+
+      - name: Show status
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl status --app "$FLY_APP"
+          echo "App URL: https://$FLY_APP.fly.dev"
+
+      - name: File GitHub issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+        with:
+          script: |
+            const workflow = process.env.WORKFLOW_NAME;
+            const sha = context.sha.substring(0, 7);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `Workflow failed: ${workflow} @ ${sha}`;
+            const body = [
+              `**Workflow:** ${workflow}`,
+              `**Commit:** ${context.sha}`,
+              `**Ref:** ${context.ref}`,
+              `**Actor:** @${context.actor}`,
+              `**Run:** ${runUrl}`,
+              ``,
+              `Filed automatically by the failure-notification step.`,
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['ops', 'workflow-failure', 'lakefs-faa-deploy'],
+              assignees: ['pbish007'],
+            });
