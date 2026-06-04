@@ -1,0 +1,45 @@
+name: FAA DB verify (one-shot)
+
+# One-shot read-only verification queries against FAA Supabase.
+# Used during PMB-133 smoke to confirm pipeline_runs + snapshot_manifest
+# rows exist with the expected columns populated.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
+      PGSSLMODE: require
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: pipeline_runs latest 3
+        run: |
+          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -c "
+            select id, run_id, snapshot_date, status, started_at, finished_at,
+                   left(coalesce(error_message,''), 80) as error
+              from faa_registry.pipeline_runs
+              order by started_at desc
+              limit 3;
+          "
+
+      - name: snapshot_manifest for today
+        run: |
+          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -c "
+            select snapshot_date, r2_prefix,
+                   master_bytes, master_etag, left(master_sha256, 12) as master_sha12,
+                   acftref_bytes, acftref_etag, left(acftref_sha256, 12) as acftref_sha12,
+                   engine_bytes, engine_etag, left(engine_sha256, 12) as engine_sha12,
+                   dealer_bytes, dealer_etag, left(dealer_sha256, 12) as dealer_sha12,
+                   dereg_bytes, dereg_etag, left(dereg_sha256, 12) as dereg_sha12,
+                   master_count, acftref_count, engine_count, dealer_count, dereg_count,
+                   created_at
+              from faa_registry.snapshot_manifest
+              where snapshot_date = current_date;
+          "
