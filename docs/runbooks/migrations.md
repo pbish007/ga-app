@@ -95,7 +95,121 @@ Until then, the live `bootstrap-demo` endpoint is the working reseed path. This
 is a developer/demo convenience, not a production data path — production tenants
 create their own data through the app.
 
-## 5. History / current state (PMB-62)
+## 5. Runtime env wiring — `DATABASE_URL` parity across Preview + Production (PMB-131)
+
+The runtime web app authenticates as the non-bypass-RLS `tenant_runtime`
+role provisioned by migration `0018`. Its password is set out-of-band on
+the Neon side (see migration `0018` header). Vercel's `DATABASE_URL` env
+var holds that connection string and is marked **sensitive** — meaning
+once set, the value is never readable back through `vercel env pull` or
+the dashboard. That property is what makes Preview vs Production drift
+hard to detect after the fact.
+
+### The rule
+
+**`DATABASE_URL` in the Preview environment scope MUST hold the same
+value as the Production environment scope.** Preview deploys today
+share the production Neon endpoint (project `royal-darkness-36853636`,
+branch `production`). This is the explicit decision recorded in
+PMB-131:
+
+- **Decision:** share the production Neon endpoint — Preview = Prod.
+- **Why:** simplest, zero new infra. No second seed pipeline. Auth /
+  RLS / RBAC paths exercised on preview are the same code paths
+  running in production, so a preview verification is meaningful.
+- **Mitigation for cross-tenant blast radius:** preview deploys are
+  protection-gated behind the Vercel automation-bypass token, so only
+  CI/QA-authorized callers can hit them. Smoke flows create
+  throwaway tenants prefixed `smoke:` / `pmb129-cleanup-*` that are
+  reaped on a documented cadence. Destructive endpoints remain auth-
+  gated by `requirePlatformAdmin`; no preview-vs-prod fork is
+  required in code.
+
+### Symptom of breakage
+
+If Preview `DATABASE_URL` drifts (wrong password, stale Neon branch
+URL, missing entirely), the symptom is `POST /api/auth/login` →
+HTTP 500 with the Postgres SQLSTATE 28P01 error
+`password authentication failed for user 'tenant_runtime'` in the
+Vercel function log. **Every** preview deploy will fail this way
+until the env var is repaired and a fresh deploy is triggered.
+
+### Setting / rotating Preview `DATABASE_URL`
+
+Because the var is sensitive, the only operators who can hand it to
+Vercel are the ones holding the standing tenant_runtime password
+(today: CEO, via the original PMB-74 rollout). Two paths:
+
+**Path A — Vercel dashboard (recommended; zero downtime):**
+
+1. Go to Vercel → project `ga-app` → Settings → Environment
+   Variables → **Production** scope.
+2. Open the existing `DATABASE_URL` row. The sensitive value is
+   masked but the holder of the original credential can re-paste it.
+3. Switch the scope filter to **Preview**, remove the existing
+   `DATABASE_URL` entry, then add a new one with the same value as
+   Production, scope = **all Preview branches**, type = **sensitive**.
+4. Trigger a fresh preview deploy (push to a feature branch, or
+   `vercel --target=preview` from `apps/web`).
+5. Verify with §5.2 below.
+
+**Path B — CLI (same prereq: holder has the value to hand):**
+
+```bash
+cd apps/web
+# Remove the drifted Preview value (idempotent; ignore "not found")
+vercel env rm DATABASE_URL preview --yes
+# Paste the production value when prompted; mark sensitive
+vercel env add DATABASE_URL preview --sensitive
+# (paste value, then Enter)
+```
+
+A new preview deploy must be triggered after the env var change —
+Vercel does not retroactively rebuild existing previews.
+
+> **Do not rotate the tenant_runtime password just to "fix" Preview.**
+> Rotating means a brief window where production auth fails until
+> both env vars are updated and both targets redeployed. Path A above
+> takes Production through zero risk.
+
+### 5.1 Smoke verification
+
+Once the Preview env is repaired and a new preview deploy is Ready,
+run the existing fresh-tenant smoke against the preview URL:
+
+```bash
+gh workflow run "Fresh-tenant smoke (PMB-121)" \
+  --field base_url=https://<preview-url>
+```
+
+A passing run proves `POST /api/auth/login` returned 200 for the QA
+platform admin (`SMOKE_PLATFORM_ADMIN_EMAIL`) — that is exactly the
+PMB-131 acceptance criterion.
+
+If you only need the login probe (no tenant mutation), an inline
+curl is sufficient:
+
+```bash
+curl -i -X POST https://<preview-url>/api/auth/login \
+  -H "Content-Type: application/json" \
+  -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+  -d '{"email":"qa-smoke-admin@gaapp.io","password":"…"}'
+```
+
+Expected: `HTTP/2 200` with a `Set-Cookie: ga_session=…` header.
+Anything 500 with body `{"error":"server_error"}` means the env var
+is still drifted; check the Vercel function log for SQLSTATE 28P01.
+
+### 5.2 Future deploy-chain changes — keep this from regressing
+
+Any future change that touches Vercel env vars or rotates the
+tenant_runtime password MUST update **both** Production and Preview
+scopes in the same heartbeat, and MUST run §5.1 against a fresh
+preview deploy before closing. The asymmetry of "sensitive vars can't
+be read back" means there is no automated drift detector — discipline
+is the only mitigation.
+
+## 6. History / current state (PMB-62)
 
 - Migration `0016_grant_tenant_app_membership.sql` (the tenant_app role grants)
   was applied **and** recorded in `schema_migrations` on prod via the temporary
