@@ -53,13 +53,14 @@ The ingest extracts the 5 FAA files to `LAKEFS_STAGING_DIR/raw/YYYY-MM-DD/{FILE}
 on disk, then a downstream GH Actions step does:
 
 ```
-lakectl fs upload --direct -s <staged-file> lakefs://faa-registry/main/raw/<date>/<FILE>.txt
+lakectl fs upload --pre-sign -s <staged-file> lakefs://faa-registry/main/raw/<date>/<FILE>.txt
 lakectl commit lakefs://faa-registry/main -m "FAA ingest <date>" --meta source=faa-arweb --meta rows=<row-count>
 lakectl tag create  lakefs://faa-registry/ingest-<date> lakefs://faa-registry/main
 ```
 
-`--direct` tells lakectl to pull a pre-signed S3 URL from the lakeFS server
-and PUT to R2 itself, so the actual file bytes never traverse the Fly VM.
+`--pre-sign` tells lakectl to pull a pre-signed S3 URL from the lakeFS
+server and PUT to R2 itself, so the actual file bytes never traverse the
+Fly VM. (In older lakeFS releases the equivalent flag was `--direct`.)
 
 The Node ingest also writes `LAKEFS_STAGING_DIR/_summary.json` with
 `{ snapshotDate, totalRows, files: [...] }` for the workflow to consume.

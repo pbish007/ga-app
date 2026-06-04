@@ -124,12 +124,12 @@ jobs:
           set -euo pipefail
           summary="$LAKEFS_STAGING_DIR/_summary.json"
           # Stream each staged file straight to R2 via a pre-signed URL.
-          # --direct keeps bytes off the Fly VM (egress + Supabase pool stay flat).
+          # --pre-sign keeps bytes off the Fly VM (egress + Supabase pool stay flat).
           jq -r '.files[].key' "$summary" | while read -r key; do
             src="$LAKEFS_STAGING_DIR/$key"
             dest="lakefs://$LAKEFS_REPO/$LAKEFS_BRANCH/$key"
-            echo "lakectl fs upload --direct -s $src $dest"
-            lakectl fs upload --direct -s "$src" "$dest"
+            echo "lakectl fs upload --pre-sign -s $src $dest"
+            lakectl fs upload --pre-sign -s "$src" "$dest"
           done
 
       - name: Commit lakeFS snapshot

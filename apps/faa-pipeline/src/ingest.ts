@@ -5,10 +5,10 @@
  *
  * As of PMB-144 the same flow can also run in `lakefs` mode: the Node
  * process extracts the files to a local staging directory and a downstream
- * GH Actions step pushes them through `lakectl fs upload --direct`, then
- * `lakectl commit` + `lakectl tag create`. Bytes flow client→R2 directly
- * via lakeFS-signed URLs; the Fly VM never sees the payload, which keeps
- * its egress and the Supabase pool flat.
+ * GH Actions step pushes them through `lakectl fs upload --pre-sign`,
+ * then `lakectl commit` + `lakectl tag create`. Bytes flow client→R2
+ * directly via lakeFS-signed URLs; the Fly VM never sees the payload,
+ * which keeps its egress and the Supabase pool flat.
  *
  * Flow:
  *   1. Start a pipeline_runs row (status='running').

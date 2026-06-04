@@ -8,7 +8,7 @@ import type { R2Client } from "./r2.js";
  *
  * In lakefs mode (PMB-144) the Node ingest does NOT push bytes to R2 directly.
  * Instead it writes each extracted FAA file to a local staging directory; a
- * downstream GitHub Actions step then runs `lakectl fs upload --direct` for
+ * downstream GitHub Actions step then runs `lakectl fs upload --pre-sign` for
  * each file, which uses a pre-signed URL so bytes flow client→R2 directly,
  * bypassing the Fly VM.
  *
