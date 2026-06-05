@@ -9,10 +9,12 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 import { organizations, users } from "./accounts.js";
+import { importJobRows } from "./import-jobs.js";
 import { regimes, regimeInspectionProgramTemplates } from "./regime.js";
 
 /**
@@ -57,6 +59,15 @@ export const aircraft = pgTable(
       .notNull()
       .default("0"),
     timeSource: text("time_source").$type<AircraftTimeSource>().notNull(),
+    /**
+     * PMB-157 traceability hook: when this row was materialized by the
+     * V1 importer, points at the staging row it came from. NULL for
+     * every interactive (front-door) aircraft.
+     */
+    sourceImportRowId: uuid("source_import_row_id").references(
+      (): AnyPgColumn => importJobRows.id,
+      { onDelete: "set null" },
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -70,6 +81,9 @@ export const aircraft = pgTable(
     ).on(t.tenantId, sql`lower(${t.registration})`),
     tenantIdx: index("aircraft_tenant_idx").on(t.tenantId),
     regimeIdx: index("aircraft_regime_idx").on(t.regimeId),
+    sourceImportRowIdx: index("aircraft_source_import_row_idx")
+      .on(t.sourceImportRowId)
+      .where(sql`${t.sourceImportRowId} is not null`),
     timeSourceCheck: check(
       "aircraft_time_source_check",
       sql`${t.timeSource} in ('hobbs', 'tach')`,

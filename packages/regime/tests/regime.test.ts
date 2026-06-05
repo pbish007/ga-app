@@ -81,7 +81,7 @@ describe("regime spine (PMB-8 / Epic K)", () => {
       (r) => r.retentionPeriodKind === "lifetime",
     );
     expect(lifetime.map((r) => r.recordKind).sort()).toEqual(
-      ["ad_compliance", "annual_inspection", "major_repair", "regime_change"],
+      ["ad_compliance", "annual_inspection", "import_source", "major_repair", "regime_change"],
     );
   });
 

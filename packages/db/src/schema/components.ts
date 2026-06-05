@@ -8,11 +8,13 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 import { organizations } from "./accounts.js";
 import { aircraft } from "./aircraft.js";
+import { importJobRows } from "./import-jobs.js";
 
 /**
  * Component kinds tracked for FAA-style maintenance: engines and
@@ -37,6 +39,15 @@ export const components = pgTable(
     tboHours: numeric("tbo_hours", { precision: 10, scale: 2 }),
     tboCalendarMonths: integer("tbo_calendar_months"),
     cycleLimit: integer("cycle_limit"),
+    /**
+     * PMB-157 traceability hook: when this component was materialized
+     * by the V1 importer, points at the staging row it came from. NULL
+     * for every interactively-created component.
+     */
+    sourceImportRowId: uuid("source_import_row_id").references(
+      (): AnyPgColumn => importJobRows.id,
+      { onDelete: "set null" },
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -49,6 +60,9 @@ export const components = pgTable(
       "components_tenant_kind_serial_unique",
     ).on(t.tenantId, t.kind, sql`lower(${t.serialNumber})`),
     tenantIdx: index("components_tenant_idx").on(t.tenantId),
+    sourceImportRowIdx: index("components_source_import_row_idx")
+      .on(t.sourceImportRowId)
+      .where(sql`${t.sourceImportRowId} is not null`),
     kindCheck: check(
       "components_kind_check",
       sql`${t.kind} in ('engine', 'propeller', 'appliance')`,

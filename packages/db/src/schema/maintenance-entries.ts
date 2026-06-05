@@ -14,6 +14,7 @@ import { sql } from "drizzle-orm";
 import { organizations, users } from "./accounts.js";
 import { aircraft } from "./aircraft.js";
 import { userCredentials } from "./credentials.js";
+import { importJobRows } from "./import-jobs.js";
 import {
   regimeInspectionProgramTemplates,
   regimeRtsTemplates,
@@ -101,6 +102,16 @@ export const maintenanceEntries = pgTable(
       { onDelete: "restrict" },
     ),
     rtsRenderedBody: text("rts_rendered_body"),
+    /**
+     * PMB-157 traceability hook: when this entry was materialized by
+     * the V1 importer, points at the staging row it came from. NULL
+     * for every interactively-drafted entry. Set at INSERT time only;
+     * the signed-row immutability trigger still applies on update.
+     */
+    sourceImportRowId: uuid("source_import_row_id").references(
+      (): AnyPgColumn => importJobRows.id,
+      { onDelete: "set null" },
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -111,6 +122,9 @@ export const maintenanceEntries = pgTable(
   (t) => ({
     tenantIdx: index("maintenance_entries_tenant_idx").on(t.tenantId),
     aircraftIdx: index("maintenance_entries_aircraft_idx").on(t.aircraftId),
+    sourceImportRowIdx: index("maintenance_entries_source_import_row_idx")
+      .on(t.sourceImportRowId)
+      .where(sql`${t.sourceImportRowId} is not null`),
     entryTypeCheck: check(
       "maintenance_entries_entry_type_check",
       sql`${t.entryType} in ('maintenance', 'annual_inspection', '100_hour_inspection', 'inspection_program', 'ad_compliance')`,

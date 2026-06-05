@@ -7,11 +7,13 @@ import {
   text,
   timestamp,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 import { organizations, users } from "./accounts.js";
 import { aircraft } from "./aircraft.js";
+import { importJobRows } from "./import-jobs.js";
 
 export const flightTimeEntries = pgTable(
   "flight_time_entries",
@@ -43,6 +45,15 @@ export const flightTimeEntries = pgTable(
     enteredByUserId: uuid("entered_by_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    /**
+     * PMB-157 traceability hook: when this entry was materialized by
+     * the V1 importer, points at the staging row it came from. NULL
+     * for every interactively-logged flight.
+     */
+    sourceImportRowId: uuid("source_import_row_id").references(
+      (): AnyPgColumn => importJobRows.id,
+      { onDelete: "set null" },
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -50,6 +61,9 @@ export const flightTimeEntries = pgTable(
   (t) => ({
     aircraftIdx: index("fte_aircraft_idx").on(t.aircraftId),
     tenantIdx: index("fte_tenant_idx").on(t.tenantId),
+    sourceImportRowIdx: index("flight_time_entries_source_import_row_idx")
+      .on(t.sourceImportRowId)
+      .where(sql`${t.sourceImportRowId} is not null`),
     enteredAtIdx: index("fte_entered_at_idx").on(t.aircraftId, t.enteredAt),
     airframeNonneg: check(
       "fte_airframe_time_new_nonneg",
