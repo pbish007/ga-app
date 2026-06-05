@@ -35,9 +35,15 @@ export {
   type Role,
 } from "./permissions.js";
 export {
+  CredentialNotFoundError,
+  CredentialNotInTenantError,
   CredentialService,
+  type ActiveCredentialView,
   type AddCredentialInput,
   type CanSignOffOptions,
+  type CreateCredentialInput,
+  type RevokeCredentialInput,
+  type UpdateCredentialInput,
 } from "./credentials.js";
 export {
   EmailAlreadyExists,
