@@ -80,6 +80,15 @@ export default async function OrgLayout({
             <Link href={`/orgs/${tenantId}/alerts`} style={navLinkStyle}>
               Alerts
             </Link>
+            {ctx.role === "admin" ? (
+              <Link
+                href={`/orgs/${tenantId}/settings/credentials`}
+                style={navLinkStyle}
+                data-testid="nav-credentials-link"
+              >
+                Credentials
+              </Link>
+            ) : null}
           </div>
           <div style={{ marginLeft: "auto" }}>
             <LogoutButton />
