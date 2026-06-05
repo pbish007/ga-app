@@ -1,6 +1,21 @@
 import type { CSSProperties } from "react";
 
 /**
+ * Status / surface tokens used by credential cards, badges, and other
+ * status-bearing UI. Amber #d97706 only meets WCAG AA against the warm
+ * `warningBg` background — never use amber as text on plain white.
+ */
+export const colorTokens = {
+  success: "#059669",
+  successBg: "#f0fdf4",
+  warning: "#d97706",
+  warningBg: "#fffbeb",
+  danger: "#dc2626",
+  dangerBg: "#fef2f2",
+  cardBorder: "#e5e7eb",
+} as const;
+
+/**
  * Shared inline-styles for MVP server-rendered pages (I1.1 design-system baseline).
  *
  * Mobile-first constraints:

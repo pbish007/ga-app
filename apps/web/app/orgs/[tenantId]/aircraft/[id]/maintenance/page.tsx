@@ -51,7 +51,13 @@ export default async function MaintenanceLogPage({
         const aircraft = await aircraftSvc.getById(ctx.tenantId, id);
         const entries = await entrySvc.listForAircraft(ctx.tenantId, aircraft.id);
         const canWrite = hasPermission(ctx.membership, "aircraft.write");
-        return { aircraft, entries, canWrite };
+        return {
+          aircraft,
+          entries,
+          canWrite,
+          regimeId: aircraft.regimeId,
+          currentUserId: ctx.userId,
+        };
       } catch (err) {
         if (err instanceof AircraftNotFoundError) return null;
         throw err;
@@ -60,7 +66,7 @@ export default async function MaintenanceLogPage({
   );
 
   if (!data) notFound();
-  const { aircraft, entries, canWrite } = data;
+  const { aircraft, entries, canWrite, regimeId, currentUserId } = data;
 
   const drafts = entries.filter((e) => !e.signedAt);
   const signed = entries.filter((e) => e.signedAt);
@@ -108,6 +114,8 @@ export default async function MaintenanceLogPage({
                 tenantId={tenantId}
                 entry={entry}
                 canSign={canWrite}
+                regimeId={regimeId}
+                currentUserId={currentUserId}
               />
             ))}
           </ul>
@@ -134,6 +142,8 @@ export default async function MaintenanceLogPage({
               tenantId={tenantId}
               entry={entry}
               canSign={false}
+              regimeId={regimeId}
+              currentUserId={currentUserId}
             />
           ))}
         </ul>
@@ -148,10 +158,14 @@ function EntryCard({
   tenantId,
   entry,
   canSign,
+  regimeId,
+  currentUserId,
 }: {
   tenantId: string;
   entry: MaintenanceEntry;
   canSign: boolean;
+  regimeId: string;
+  currentUserId: string;
 }) {
   const isSigned = !!entry.signedAt;
   const cardStyle: CSSProperties = {
@@ -239,7 +253,12 @@ function EntryCard({
       ) : null}
       {canSign && !isSigned ? (
         <div style={{ marginTop: "0.25rem" }}>
-          <SignEntryButton tenantId={tenantId} entryId={entry.id} />
+          <SignEntryButton
+            tenantId={tenantId}
+            entryId={entry.id}
+            regimeId={regimeId}
+            userId={currentUserId}
+          />
         </div>
       ) : null}
     </li>
