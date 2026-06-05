@@ -181,6 +181,22 @@ importers:
         specifier: 2.1.8
         version: 2.1.8(@types/node@22.10.5)
 
+  packages/import:
+    dependencies:
+      '@ga/db':
+        specifier: workspace:*
+        version: link:../db
+    devDependencies:
+      '@types/node':
+        specifier: 22.10.5
+        version: 22.10.5
+      typescript:
+        specifier: 5.7.2
+        version: 5.7.2
+      vitest:
+        specifier: 2.1.8
+        version: 2.1.8(@types/node@22.10.5)
+
   packages/notifications:
     dependencies:
       '@ga/compliance':
