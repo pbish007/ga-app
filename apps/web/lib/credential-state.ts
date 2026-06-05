@@ -72,8 +72,8 @@ export function badgeLabel(
       return "Current";
     case "expiring":
       return daysRemaining !== null
-        ? `Expires in ${daysRemaining}d`
-        : "Expiring";
+        ? `Expiring soon (${daysRemaining} days)`
+        : "Expiring soon";
     case "expired":
       return "Expired";
     case "revoked":

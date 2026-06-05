@@ -72,10 +72,10 @@ describe("daysUntilExpiry", () => {
 
 describe("badgeLabel", () => {
   it("includes day count for expiring", () => {
-    expect(badgeLabel("expiring", 30)).toBe("Expires in 30d");
+    expect(badgeLabel("expiring", 30)).toBe("Expiring soon (30 days)");
   });
   it("falls back to plain label for expiring with no day count", () => {
-    expect(badgeLabel("expiring", null)).toBe("Expiring");
+    expect(badgeLabel("expiring", null)).toBe("Expiring soon");
   });
   it("uses 'No certs' for none state", () => {
     expect(badgeLabel("none", null)).toBe("No certs");

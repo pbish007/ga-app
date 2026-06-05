@@ -490,14 +490,6 @@ export function CredentialFormModal(props: Props) {
       </form>
       <div style={footer}>
         <button
-          type="button"
-          onClick={props.onClose}
-          style={ghostButton}
-          disabled={submitting}
-        >
-          Cancel
-        </button>
-        <button
           type="submit"
           onClick={handleSubmit}
           style={s.button}
@@ -505,6 +497,14 @@ export function CredentialFormModal(props: Props) {
           data-testid="credential-form-save"
         >
           {submitting ? "Saving…" : "Save certificate"}
+        </button>
+        <button
+          type="button"
+          onClick={props.onClose}
+          style={ghostButton}
+          disabled={submitting}
+        >
+          Cancel
         </button>
       </div>
     </ModalShell>
