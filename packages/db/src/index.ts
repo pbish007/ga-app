@@ -53,9 +53,13 @@ export type {
   RegimeRtsTemplate,
 } from "./schema/regime.js";
 export type {
+  CredentialAuditAction,
   NewUserCredential,
+  NewUserCredentialChange,
   UserCredential,
+  UserCredentialChange,
 } from "./schema/credentials.js";
+export { CREDENTIAL_AUDIT_ACTIONS } from "./schema/credentials.js";
 export type {
   Aircraft,
   AircraftInspectionSubscription,

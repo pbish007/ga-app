@@ -11,6 +11,7 @@ export const APP_PERMISSION_CODES = [
   "signoff.create",
   "signoff.read",
   "org.manage_users",
+  "credential.manage",
 ] as const;
 export type AppPermissionCode = (typeof APP_PERMISSION_CODES)[number];
 
