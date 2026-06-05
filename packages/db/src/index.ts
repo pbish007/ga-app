@@ -57,6 +57,20 @@ export type {
   UserCredential,
 } from "./schema/credentials.js";
 export type {
+  ImportJob,
+  ImportJobRow,
+  ImportJobRowValidationStatus,
+  ImportJobState,
+  ImportJobTargetTable,
+  NewImportJob,
+  NewImportJobRow,
+} from "./schema/import-jobs.js";
+export {
+  IMPORT_JOB_ROW_VALIDATION_STATUSES,
+  IMPORT_JOB_STATES,
+  IMPORT_JOB_TARGET_TABLES,
+} from "./schema/import-jobs.js";
+export type {
   Aircraft,
   AircraftInspectionSubscription,
   AircraftRegimeChange,
