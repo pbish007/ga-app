@@ -41,11 +41,23 @@ jobs:
       - name: Install jq
         run: sudo apt-get install -y jq
 
+      - name: Resolve bypass token
+        id: bypass
+        run: |
+          PROD_URL="https://ga-app-taupe.vercel.app"
+          base_url="${{ steps.url.outputs.base_url }}"
+          if [ "$base_url" != "$PROD_URL" ]; then
+            echo "token=${{ secrets.VERCEL_AUTOMATION_BYPASS_TOKEN }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "token=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run fresh-tenant smoke
         env:
           BASE_URL: ${{ steps.url.outputs.base_url }}
           PLATFORM_ADMIN_EMAIL: ${{ secrets.SMOKE_PLATFORM_ADMIN_EMAIL }}
           PLATFORM_ADMIN_PASSWORD: ${{ secrets.SMOKE_PLATFORM_ADMIN_PASSWORD }}
+          VERCEL_PROTECTION_BYPASS: ${{ steps.bypass.outputs.token }}
         run: bash apps/web/scripts/smoke-fresh-tenant.sh
 
       - name: File GitHub issue on failure
