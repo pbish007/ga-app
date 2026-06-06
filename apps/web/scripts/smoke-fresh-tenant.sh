@@ -113,9 +113,11 @@ http() {
 
   local bypass_args=()
   if [ -n "${VERCEL_PROTECTION_BYPASS:-}" ]; then
+    # x-vercel-set-bypass-cookie is intentionally omitted: sending it on non-GET
+    # requests causes Vercel to issue a 307 redirect to set the cookie, which
+    # breaks POST bodies. The bypass token alone is sufficient for API calls.
     bypass_args=(
       -H "x-vercel-protection-bypass: ${VERCEL_PROTECTION_BYPASS}"
-      -H "x-vercel-set-bypass-cookie: samesitenone"
     )
   fi
 
