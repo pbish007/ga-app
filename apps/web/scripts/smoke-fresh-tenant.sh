@@ -17,6 +17,9 @@
 #   SMOKE_IDEMPOTENCY_KEY      idempotency key for the tenant create call;
 #                              defaults to smoke-<unix-timestamp> to guarantee
 #                              a fresh tenant each run
+#   VERCEL_PROTECTION_BYPASS   when set, injects x-vercel-protection-bypass and
+#                              x-vercel-set-bypass-cookie headers on every request
+#                              (required to hit preview URLs gated by Vercel SSO)
 #
 # Exit codes:
 #   0 — all asserted steps passed
@@ -108,10 +111,19 @@ http() {
     cookie_args=(-b "$cookie_file" -c "$cookie_file")
   fi
 
+  local bypass_args=()
+  if [ -n "${VERCEL_PROTECTION_BYPASS:-}" ]; then
+    bypass_args=(
+      -H "x-vercel-protection-bypass: ${VERCEL_PROTECTION_BYPASS}"
+      -H "x-vercel-set-bypass-cookie: samesitenone"
+    )
+  fi
+
   local status
   status=$(curl -s -o "$tmpfile" -w "%{http_code}" \
     -X "$method" \
     "${cookie_args[@]}" \
+    "${bypass_args[@]}" \
     "$@" \
     "$url")
 
