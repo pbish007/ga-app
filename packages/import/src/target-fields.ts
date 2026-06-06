@@ -74,11 +74,28 @@ export interface TargetField {
  *   - `sourceImportRowId` (commit pipeline sets to the staging row id)
  *
  * Columns deliberately excluded because they belong to a later flow:
- *   - maintenance_entries sign-off half (signed_at, signed_by_*,
- *     rts_*, signed_by_certificate_number) — backfilled maintenance
- *     rows land unsigned; the sign() flow (Epic F) is interactive.
  *   - maintenance_entries.correction_of_id — corrections are a
  *     future-row workflow, not a backfill shape.
+ *   - maintenance_entries.signed_by_user_id /
+ *     maintenance_entries.signed_by_credential_id /
+ *     maintenance_entries.rts_template_id /
+ *     maintenance_entries.rts_rendered_body — the C5 commit pipeline
+ *     resolves these from the operator-facing carriers (cert # → user +
+ *     credential via tenant cursor; rts_template_code → regime template
+ *     id + rendered body via regime catalog) so the spreadsheet only
+ *     carries the human-readable form. The carriers are surfaced here
+ *     as `signedByCertificateNumber` and `rtsTemplateCode`.
+ *
+ * Maintenance-entry sign-off shape (PMB-160 / C4):
+ *   - signedAt, signedByCertificateNumber, and rtsTemplateCode are
+ *     listed here as `required: false` so the C3 mapping-config
+ *     validator does not require operators to declare them up-front
+ *     (the column-mapping UI gradually fills these in). The per-entity
+ *     maintenance validator (C4) is the authoritative gate: it
+ *     REQUIRES all three on every row at validate time and rejects
+ *     unsigned historical rows with `UNSIGNED_HISTORICAL`. Treat their
+ *     `required: false` here as a config-layer concession, not as
+ *     application-layer optionality.
  */
 export const TARGET_FIELDS: Record<
   ImportJobTargetTable,
@@ -128,6 +145,21 @@ export const TARGET_FIELDS: Record<
       type: { kind: "uuid" },
       required: false,
       defaultsToNull: true,
+    },
+    {
+      name: "signedAt",
+      type: { kind: "datetime" },
+      required: false,
+    },
+    {
+      name: "signedByCertificateNumber",
+      type: { kind: "text" },
+      required: false,
+    },
+    {
+      name: "rtsTemplateCode",
+      type: { kind: "text" },
+      required: false,
     },
   ],
 
