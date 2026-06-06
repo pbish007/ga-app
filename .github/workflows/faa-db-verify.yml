@@ -6,6 +6,11 @@ name: FAA DB verify (one-shot)
 
 on:
   workflow_dispatch:
+    inputs:
+      snapshot_date:
+        description: 'Optional snapshot_date (YYYY-MM-DD). Empty = current_date.'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -16,21 +21,34 @@ jobs:
     env:
       FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
       PGSSLMODE: require
+      SNAPSHOT_DATE: ${{ inputs.snapshot_date }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: pipeline_runs latest 3
+      - name: pipeline_runs latest 5
         run: |
           psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -c "
             select id, run_id, snapshot_date, status, started_at, finished_at,
                    left(coalesce(error_message,''), 80) as error
               from faa_registry.pipeline_runs
               order by started_at desc
-              limit 3;
+              limit 5;
           "
 
-      - name: snapshot_manifest for today
+      - name: snapshot_manifest for target date
         run: |
+          target="${SNAPSHOT_DATE:-}"
+          if [ -z "$target" ]; then
+            target_sql="current_date"
+          else
+            # validate YYYY-MM-DD
+            if ! [[ "$target" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "::error::snapshot_date must be YYYY-MM-DD, got '$target'"
+              exit 64
+            fi
+            target_sql="DATE '$target'"
+          fi
+          echo "Querying snapshot_manifest where snapshot_date = $target_sql"
           psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -c "
             select snapshot_date, r2_prefix,
                    master_bytes, master_etag, left(master_sha256, 12) as master_sha12,
@@ -41,5 +59,5 @@ jobs:
                    master_count, acftref_count, engine_count, dealer_count, dereg_count,
                    created_at
               from faa_registry.snapshot_manifest
-              where snapshot_date = current_date;
+              where snapshot_date = $target_sql;
           "
