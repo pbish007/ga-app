@@ -14,7 +14,9 @@
     "lint": "echo skip"
   },
   "dependencies": {
-    "@ga/db": "workspace:*"
+    "@ga/db": "workspace:*",
+    "exceljs": "^4.4.0",
+    "fast-csv": "^5.0.7"
   },
   "devDependencies": {
     "@types/node": "22.10.5",
