@@ -353,7 +353,7 @@ describe("PMB-157 importer schema (migration 0028)", () => {
 
     it("IMPORT_JOB_ROW_VALIDATION_STATUSES matches the SQL CHECK list", () => {
       expect([...IMPORT_JOB_ROW_VALIDATION_STATUSES].sort()).toEqual(
-        ["pending", "valid", "invalid"].sort(),
+        ["pending", "valid", "invalid", "committed"].sort(),
       );
     });
 

@@ -55,12 +55,16 @@ export type ImportJobTargetTable = (typeof IMPORT_JOB_TARGET_TABLES)[number];
 
 /**
  * Per-row validation status. Drives the importer UI (per-cell error
- * highlighting) and the commit gate (only 'valid' rows commit).
+ * highlighting) and the commit gate (only 'valid' rows commit). The
+ * C5 commit pipeline (PMB-161) flips a row from 'valid' to 'committed'
+ * inside the single commit transaction alongside the live INSERT and
+ * the `committed_record_id` write.
  */
 export const IMPORT_JOB_ROW_VALIDATION_STATUSES = [
   "pending",
   "valid",
   "invalid",
+  "committed",
 ] as const;
 export type ImportJobRowValidationStatus =
   (typeof IMPORT_JOB_ROW_VALIDATION_STATUSES)[number];
@@ -176,7 +180,7 @@ export const importJobRows = pgTable(
     ),
     validationStatusCheck: check(
       "import_job_rows_validation_status_check",
-      sql`${t.validationStatus} in ('pending', 'valid', 'invalid')`,
+      sql`${t.validationStatus} in ('pending', 'valid', 'invalid', 'committed')`,
     ),
     targetTableCheck: check(
       "import_job_rows_target_table_check",
