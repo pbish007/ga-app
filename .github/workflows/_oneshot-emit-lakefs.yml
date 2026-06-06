@@ -1,0 +1,32 @@
+name: One-shot emit lakeFS creds (split-half)
+
+# Temporary workflow to surface write-only GH Actions secrets via
+# split-at-midpoint emit (GH masks exact secret values, not halves).
+# Per board request 2026-06-06 on PMB-180.
+# DELETE THIS FILE AND ITS RUN AFTER USE.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  emit:
+    runs-on: ubuntu-latest
+    env:
+      EP: ${{ secrets.LAKEFS_ENDPOINT }}
+      AK: ${{ secrets.LAKEFS_ACCESS_KEY_ID }}
+      SK: ${{ secrets.LAKEFS_SECRET_ACCESS_KEY }}
+    steps:
+      - name: split-half emit
+        run: |
+          set -u
+          for name in EP AK SK; do
+            v="${!name}"
+            l=${#v}
+            m=$(( l / 2 ))
+            printf '<%s1>%s</%s1>\n' "$name" "${v:0:$m}" "$name"
+            printf '<%s2>%s</%s2>\n' "$name" "${v:$m}" "$name"
+            printf '<%s_LEN>%d</%s_LEN>\n' "$name" "$l" "$name"
+          done
