@@ -12,7 +12,7 @@ The runtime types and validator live in `@ga/import`:
 
 - `MappingConfig` — TypeScript shape.
 - `MAPPING_CONFIG_JSON_SCHEMA` — JSON Schema (draft 2020-12) for structural validation.
-- `validateMappingConfig(cfg, { availableColumns? })` — semantic validation; returns `MappingConfigIssue[]`.
+- `validateMappingConfig(cfg, { availableColumns? })` — semantic validation; returns `{ ok, issues, advisories }`.
 - `applyMapping(cfg, parsedRow, lookupAdapter)` — produces `MappedRow`.
 
 ## Top-level shape
@@ -189,7 +189,7 @@ Sign-off fields (`signedAt`, `signedBy*`, `rts*`, `correctionOfId`) are **not** 
 
 ## Validation outcomes
 
-`validateMappingConfig` returns `{ ok, issues }`. Each issue has a stable `code`, a free-text `message`, and a JSON Pointer-ish `path` into the config.
+`validateMappingConfig` returns `{ ok, issues, advisories }`. Each issue has a stable `code`, a free-text `message`, and a JSON Pointer-ish `path` into the config. Advisories carry a `code`, `message`, and a `fields` array; they are non-blocking and never flip `ok` to `false`.
 
 | `code`                   | Meaning                                                                                            |
 | ------------------------ | -------------------------------------------------------------------------------------------------- |
@@ -207,6 +207,12 @@ Sign-off fields (`signedAt`, `signedBy*`, `rts*`, `correctionOfId`) are **not** 
 | `INVALID_LOOKUP_KIND`    | Lookup `kind` is not in the supported set.                                                         |
 | `MISSING_LOOKUP_KEY`     | A required lookup key is missing (e.g. `value` on `regime_by_code`, `sourceColumn` elsewhere).      |
 | `MISSING_COMPONENT_KIND` | `component_by_serial` is missing the required `componentKind`.                                     |
+
+### Advisory codes (non-blocking)
+
+| `code`                                  | Meaning                                                                                                                                                                                                                                                                          |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAINTENANCE_SIGN_OFF_CARRIERS_UNBOUND` | `targetTable === "maintenance_entries"` but one or more of `signedAt`, `signedByCertificateNumber`, `rtsTemplateCode` is not bound from a source column. C4's per-entity validator requires all three on every row; an unbound template would fail every preview row with `UNSIGNED_HISTORICAL`. (PMB-183) |
 
 ## Worked example — paper-log maintenance entries
 
