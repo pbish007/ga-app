@@ -344,6 +344,160 @@ describe("validateMappingConfig — duplicate sources", () => {
   });
 });
 
+describe("validateMappingConfig — maintenance_entries sign-off advisory (PMB-183)", () => {
+  // Minimal valid maintenance_entries config builder. Tests vary which
+  // of the three sign-off carriers are mapped from columns; everything
+  // else stays the same so the only signal is the advisory.
+  function maintenanceConfig(extraColumns: Record<string, { source: string }>): MappingConfig {
+    return {
+      version: "1",
+      targetTable: "maintenance_entries",
+      columns: {
+        workPerformed: { source: "Description" },
+        performedOn: {
+          source: "Date",
+          format: { kind: "date", format: "MM/DD/YYYY" },
+        },
+        aircraftTotalTime: { source: "TT", format: { kind: "decimal" } },
+        ...extraColumns,
+      },
+      constants: { entryType: "maintenance" },
+      lookups: [
+        {
+          kind: "aircraft_by_registration",
+          target: "aircraftId",
+          sourceColumn: "Tail #",
+        },
+      ],
+    };
+  }
+
+  it("emits no advisory when all three sign-off carriers are bound", () => {
+    const result = validateMappingConfig(
+      maintenanceConfig({
+        signedAt: { source: "Signed At" },
+        signedByCertificateNumber: { source: "Cert #" },
+        rtsTemplateCode: { source: "RTS Code" },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.issues).toHaveLength(0);
+    expect(result.advisories).toHaveLength(0);
+  });
+
+  it("emits an advisory naming the two unbound carriers when exactly one is bound", () => {
+    const result = validateMappingConfig(
+      maintenanceConfig({
+        signedAt: { source: "Signed At" },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.advisories).toHaveLength(1);
+    const adv = result.advisories[0];
+    expect(adv.code).toBe("MAINTENANCE_SIGN_OFF_CARRIERS_UNBOUND");
+    expect(adv.fields).toEqual([
+      "signedByCertificateNumber",
+      "rtsTemplateCode",
+    ]);
+    expect(adv.message).toContain("signedByCertificateNumber");
+    expect(adv.message).toContain("rtsTemplateCode");
+    expect(adv.message).not.toContain("signedAt,");
+  });
+
+  it("emits an advisory naming all three carriers when none are bound", () => {
+    const result = validateMappingConfig(maintenanceConfig({}));
+    expect(result.ok).toBe(true);
+    expect(result.advisories).toHaveLength(1);
+    const adv = result.advisories[0];
+    expect(adv.code).toBe("MAINTENANCE_SIGN_OFF_CARRIERS_UNBOUND");
+    expect(adv.fields).toEqual([
+      "signedAt",
+      "signedByCertificateNumber",
+      "rtsTemplateCode",
+    ]);
+    expect(adv.message).toContain("signedAt");
+    expect(adv.message).toContain("signedByCertificateNumber");
+    expect(adv.message).toContain("rtsTemplateCode");
+  });
+
+  it("does not emit the advisory for aircraft / components / flight_time_entries", () => {
+    const aircraft = validateMappingConfig({
+      version: "1",
+      targetTable: "aircraft",
+      columns: {
+        registration: { source: "Tail" },
+        make: { source: "Make" },
+        model: { source: "Model" },
+        serialNumber: { source: "SN" },
+        category: { source: "Cat" },
+        aircraftClass: { source: "Class" },
+      },
+      constants: { timeSource: "tach" },
+      lookups: [{ kind: "regime_by_code", target: "regimeId", value: "FAA" }],
+    });
+    expect(aircraft.ok).toBe(true);
+    expect(aircraft.advisories).toHaveLength(0);
+
+    const components = validateMappingConfig({
+      version: "1",
+      targetTable: "components",
+      columns: { serialNumber: { source: "SN" } },
+      constants: { kind: "engine" },
+    });
+    expect(components.advisories).toHaveLength(0);
+
+    const flight = validateMappingConfig({
+      version: "1",
+      targetTable: "flight_time_entries",
+      columns: { airframeTimeNew: { source: "TT", format: { kind: "decimal" } } },
+      lookups: [
+        {
+          kind: "aircraft_by_registration",
+          target: "aircraftId",
+          sourceColumn: "Tail",
+        },
+      ],
+    });
+    expect(flight.advisories).toHaveLength(0);
+  });
+
+  it("treats a constant on a sign-off carrier as still unbound (column binding is what C4 needs per row)", () => {
+    // signedAt as a constant would assign the same timestamp to every
+    // row, which is meaningless for sign-off. The advisory should fire
+    // because the operator hasn't bound a per-row source column.
+    const result = validateMappingConfig({
+      version: "1",
+      targetTable: "maintenance_entries",
+      columns: {
+        workPerformed: { source: "Description" },
+        performedOn: {
+          source: "Date",
+          format: { kind: "date", format: "MM/DD/YYYY" },
+        },
+        aircraftTotalTime: { source: "TT", format: { kind: "decimal" } },
+      },
+      constants: {
+        entryType: "maintenance",
+        signedAt: "2025-01-01T00:00:00Z",
+      },
+      lookups: [
+        {
+          kind: "aircraft_by_registration",
+          target: "aircraftId",
+          sourceColumn: "Tail #",
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.advisories).toHaveLength(1);
+    expect(result.advisories[0].fields).toEqual([
+      "signedAt",
+      "signedByCertificateNumber",
+      "rtsTemplateCode",
+    ]);
+  });
+});
+
 describe("validateMappingConfig — availableColumns", () => {
   it("rejects column mappings whose source column is missing from the upload", () => {
     const result = validateMappingConfig(

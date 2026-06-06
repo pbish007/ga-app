@@ -48,10 +48,49 @@ export interface ValidateMappingConfigOptions {
   availableColumns?: readonly string[];
 }
 
+/**
+ * Non-blocking advisory entries the C3 validator emits when a config
+ * is structurally valid but likely to fail a downstream C4 row-time
+ * check. Surfaced to the operator at template setup time so they fix
+ * the mapping before every preview row trips the same C4 error.
+ *
+ * Advisories never flip `ok` to false — they exist purely so the UI
+ * can warn ("you'll likely want to map these too") without blocking.
+ */
+export interface MappingConfigAdvisory {
+  /** Stable code so the UI can localize or group advisories. */
+  code: "MAINTENANCE_SIGN_OFF_CARRIERS_UNBOUND";
+  message: string;
+  /**
+   * Target field names this advisory points at, so the UI can
+   * highlight the corresponding mapping cells.
+   */
+  fields: readonly string[];
+}
+
 export interface ValidateMappingConfigResult {
   ok: boolean;
   issues: MappingConfigIssue[];
+  /**
+   * Non-blocking warnings about the config. Empty when the config has
+   * no known UX foot-guns. See `MappingConfigAdvisory`.
+   */
+  advisories: MappingConfigAdvisory[];
 }
+
+/**
+ * Sign-off carrier fields C4's maintenance-entry validator requires
+ * on every row. Listed as `required: false` in TARGET_FIELDS because
+ * the catalog's `required` mirrors DB nullability and Epic F's
+ * sign()-after-draft flow needs the column nullable. Surfaced here
+ * as a C3 advisory so a `maintenance_entries` template that omits
+ * them gets caught at setup time rather than at preview time.
+ */
+const MAINTENANCE_SIGN_OFF_CARRIERS = [
+  "signedAt",
+  "signedByCertificateNumber",
+  "rtsTemplateCode",
+] as const;
 
 /**
  * Pure validation pass over a mapping config. Returns a list of
@@ -72,6 +111,7 @@ export function validateMappingConfig(
   options: ValidateMappingConfigOptions = {},
 ): ValidateMappingConfigResult {
   const issues: MappingConfigIssue[] = [];
+  const advisories: MappingConfigAdvisory[] = [];
 
   if (config.version !== "1") {
     issues.push({
@@ -91,7 +131,7 @@ export function validateMappingConfig(
       message: `unknown target table '${String(config.targetTable)}'`,
       path: "targetTable",
     });
-    return { ok: false, issues };
+    return { ok: false, issues, advisories };
   }
 
   const fields = targetFieldsFor(config.targetTable);
@@ -209,7 +249,34 @@ export function validateMappingConfig(
     }
   }
 
-  return { ok: issues.length === 0, issues };
+  // ---- advisories -------------------------------------------------
+  // PMB-183: warn at C3 when a maintenance_entries template does not
+  // bind the three sign-off carriers. C4's maintenance-entry validator
+  // (PMB-160) requires all three on every row, so an unbound template
+  // would fail every preview row with UNSIGNED_HISTORICAL. The check
+  // is scoped to columns (the per-row source binding) because a
+  // constant signedAt / cert # / template code is meaningless for
+  // sign-off, which is always per-row data.
+  if (config.targetTable === "maintenance_entries") {
+    const boundColumns = config.columns
+      ? new Set(Object.keys(config.columns))
+      : new Set<string>();
+    const unbound = MAINTENANCE_SIGN_OFF_CARRIERS.filter(
+      (name) => !boundColumns.has(name),
+    );
+    if (unbound.length > 0) {
+      advisories.push({
+        code: "MAINTENANCE_SIGN_OFF_CARRIERS_UNBOUND",
+        message:
+          `maintenance_entries import requires sign-off on every row; ` +
+          `bind source columns for ${unbound.join(", ")} or every preview row ` +
+          `will fail UNSIGNED_HISTORICAL at validate time`,
+        fields: unbound,
+      });
+    }
+  }
+
+  return { ok: issues.length === 0, issues, advisories };
 }
 
 function validateFormatAgainstField(
