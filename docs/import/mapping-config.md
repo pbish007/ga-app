@@ -162,8 +162,11 @@ Per-table closed list of fields the importer is allowed to populate. Anything no
 | `performedOn`         | date                                                                | yes      | ISO calendar date.                              |
 | `aircraftTotalTime`   | decimal                                                             | yes      | DB CHECK: ≥ 0.                                  |
 | `inspectionProgramId` | uuid                                                                | no       | Optional; resolves an inspection program template. |
+| `signedAt`            | datetime                                                            | no       | Sign-off carrier. C3.5 emits a sign-off advisory if unbound; C4 is the authoritative row-time gate for `UNSIGNED_HISTORICAL`. |
+| `signedByCertificateNumber` | text                                                          | no       | Sign-off carrier. C3.5 emits a sign-off advisory if unbound; C4 is the authoritative row-time gate for `UNSIGNED_HISTORICAL`. |
+| `rtsTemplateCode`     | text                                                                | no       | Sign-off carrier. C3.5 emits a sign-off advisory if unbound; C4 is the authoritative row-time gate for `UNSIGNED_HISTORICAL`. |
 
-Sign-off fields (`signedAt`, `signedBy*`, `rts*`, `correctionOfId`) are **not** part of the importer surface. Imported entries land unsigned; the sign() flow (Epic F) handles them interactively.
+Sign-off carriers (`signedAt`, `signedByCertificateNumber`, `rtsTemplateCode`) ARE part of the importer surface as `required: false`. C3.5 emits a sign-off advisory when they are unbound, and C4 is the authoritative row-time gate: rows with all three bound and validly typed land as signed historical entries; rows missing any of the three land as `UNSIGNED_HISTORICAL` and the interactive sign() flow (Epic F) closes them out. The correction-of carrier (`correctionOfId`) is still future-flow and is not on the importer surface.
 
 ### `components`
 
