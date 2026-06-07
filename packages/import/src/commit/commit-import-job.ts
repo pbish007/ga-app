@@ -193,7 +193,14 @@ export async function commitImportJob(
       };
     });
   } catch (err) {
-    if (err instanceof ImportJobNotCommitableError) {
+    // Both gate errors bypass the failure-recording path: the inner tx
+    // rolled back, no live rows were written, and the job stays in
+    // 'ready' so the operator can fix and retry without a state reset.
+    // The HTTP handler maps these to 409/422 respectively (PMB-201).
+    if (
+      err instanceof ImportJobNotCommitableError ||
+      err instanceof ImportJobHasInvalidRowsError
+    ) {
       throw err;
     }
     await recordCommitFailure(db, input, err);
