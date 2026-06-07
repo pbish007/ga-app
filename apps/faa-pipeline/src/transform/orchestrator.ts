@@ -81,7 +81,8 @@ export async function runTransform(
       return { skipped: true };
     }
 
-    // Bronze sources: file:// from local staging dir, or s3:// from R2.
+    // Bronze sources: bare absolute path from local staging dir, or s3:// from R2.
+    // (DuckDB read_csv_auto rejects the file:// URI scheme; pass the path raw.)
     const sources = buildSources(config);
     const destinations = buildBronzeDestinations(rootBronzeUri, snapshotDate);
 
@@ -155,7 +156,7 @@ function buildSources(config: TransformConfig): Record<FaaFile, string> {
   const out = {} as Record<FaaFile, string>;
   for (const f of FAA_FILES) {
     if (config.localRawDir) {
-      out[f] = `file://${join(config.localRawDir, rawKey(config.snapshotDate, f))}`;
+      out[f] = join(config.localRawDir, rawKey(config.snapshotDate, f));
     } else {
       out[f] = `s3://${config.r2Bucket}/${rawKey(config.snapshotDate, f)}`;
     }

@@ -20,7 +20,7 @@ import { runDuckSql, r2Preamble, parseSingleRowCsv, type R2Credentials } from ".
 import { FAA_FILES, type FaaFile } from "../lib/config.js";
 
 export interface BronzeInputs {
-  /** Per-table source URI: either file:///… or s3://bucket/key */
+  /** Per-table source: a bare absolute path (local file) or s3://bucket/key URI. DuckDB read_csv_auto does NOT accept file:// URIs. */
   sources: Record<FaaFile, string>;
   /** Per-table destination URI for the Parquet output. Must be s3:// or file://. */
   destinations: Record<FaaFile, string>;

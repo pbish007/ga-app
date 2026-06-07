@@ -287,7 +287,7 @@ describeMaybe("transform pipeline (SCD-2 + getAircraftAsOf)", () => {
     writeFileSync(join(rawDir, "DEREG.txt"), emptyTxt("N-NUMBER,DEREG-DATE"));
 
     const sources = Object.fromEntries(
-      FAA_FILES.map((f) => [f, `file://${join(rawDir, `${f}.txt`)}`]),
+      FAA_FILES.map((f) => [f, join(rawDir, `${f}.txt`)]),
     ) as Record<FaaFile, string>;
     const destinations = Object.fromEntries(
       FAA_FILES.map((f) => [f, bronzeUri(r2Root, day.date, f)]),
