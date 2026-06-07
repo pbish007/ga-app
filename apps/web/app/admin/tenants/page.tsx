@@ -150,6 +150,9 @@ export default async function AdminTenantsListPage({
         <Link href="/orgs" style={s.link}>
           ← Organizations
         </Link>
+        <Link href="/admin/imports" style={s.link}>
+          Imports
+        </Link>
         <Link href="/admin/audit" style={s.link}>
           Audit feed
         </Link>
