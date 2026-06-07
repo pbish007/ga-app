@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 import { PGlite } from "@electric-sql/pglite";
+import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { sql } from "drizzle-orm";
 
@@ -55,7 +56,7 @@ async function applyMigrations(pg: PGlite): Promise<void> {
  * callers are migrated.
  */
 export async function setupTestDb(): Promise<TestDb> {
-  const pg = new PGlite();
+  const pg = new PGlite({ extensions: { pg_trgm } });
   await applyMigrations(pg);
   const db = drizzle(pg, { schema }) as TestDb;
   db.$client = pg;
