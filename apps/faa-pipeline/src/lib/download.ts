@@ -14,24 +14,98 @@ export interface DownloadResult {
   files: Record<FaaFile, FaaFilePayload>;
 }
 
-/** Download the FAA ReleasableAircraft ZIP and extract the five fixed-width files. */
+export interface RetryOptions {
+  /** Max attempts including the initial try. PMB-110 AC: 3. */
+  maxAttempts?: number;
+  /** Base delay in ms; backoff = base * 2^(attempt-1). */
+  baseDelayMs?: number;
+  /** Hook for tests; default is `setTimeout`. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Hook for tests/observability; called once per attempted retry. */
+  onRetry?: (info: {
+    attempt: number;
+    nextAttempt: number;
+    delayMs: number;
+    error: Error;
+  }) => void;
+}
+
+const DEFAULT_RETRY: Required<Omit<RetryOptions, "onRetry">> = {
+  maxAttempts: 3,
+  baseDelayMs: 1_000,
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+};
+
+/**
+ * Download the FAA ReleasableAircraft ZIP with bounded retry on transient
+ * failures and extract the five fixed-width files.
+ *
+ * Retries: AC PMB-110 mandates up to 3 attempts on transient FAA download
+ * failures (network error, 5xx, 429). 4xx other than 429 are permanent and
+ * surface immediately so we don't waste attempts on a misconfigured URL.
+ */
 export async function downloadFaaSnapshot(
   zipUrl: string,
   fetchImpl: typeof fetch = fetch,
+  retry: RetryOptions = {},
 ): Promise<DownloadResult> {
-  const res = await fetchImpl(zipUrl, {
-    redirect: "follow",
-    headers: { "user-agent": "ga-app faa-pipeline (PMB-105)" },
-  });
+  const { maxAttempts, baseDelayMs, sleep } = { ...DEFAULT_RETRY, ...retry };
+  const onRetry = retry.onRetry;
 
-  if (!res.ok) {
-    throw new Error(
-      `FAA download failed: ${res.status} ${res.statusText} for ${zipUrl}`,
-    );
+  let lastErr: Error | undefined;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetchImpl(zipUrl, {
+        redirect: "follow",
+        headers: { "user-agent": "ga-app faa-pipeline (PMB-105)" },
+      });
+
+      if (!res.ok) {
+        const err = new HttpError(
+          `FAA download failed: ${res.status} ${res.statusText} for ${zipUrl}`,
+          res.status,
+        );
+        if (!isTransientStatus(res.status)) throw err;
+        throw err;
+      }
+
+      const zipBuf = Buffer.from(await res.arrayBuffer());
+      return extractFromZip(zipBuf);
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      lastErr = e;
+
+      const transient = isTransientError(e);
+      const hasMore = attempt < maxAttempts;
+      if (!transient || !hasMore) throw e;
+
+      const delayMs = baseDelayMs * 2 ** (attempt - 1);
+      onRetry?.({ attempt, nextAttempt: attempt + 1, delayMs, error: e });
+      await sleep(delayMs);
+    }
   }
 
-  const zipBuf = Buffer.from(await res.arrayBuffer());
-  return extractFromZip(zipBuf);
+  throw lastErr ?? new Error("FAA download failed: unknown");
+}
+
+export class HttpError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "HttpError";
+  }
+}
+
+function isTransientStatus(status: number): boolean {
+  return status === 408 || status === 429 || (status >= 500 && status <= 599);
+}
+
+function isTransientError(err: Error): boolean {
+  if (err instanceof HttpError) return isTransientStatus(err.status);
+  // Network-level errors (ENETUNREACH, ECONNRESET, ETIMEDOUT, AbortError)
+  // surface as plain Errors from undici/global fetch. Treat anything that
+  // isn't a malformed-ZIP / missing-file failure as transient.
+  if (/missing required files|FAA ZIP/i.test(err.message)) return false;
+  return true;
 }
 
 export function extractFromZip(zipBuf: Buffer): DownloadResult {
