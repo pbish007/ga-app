@@ -32,6 +32,7 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { runBronze, bronzeUri } from "./bronze.js";
 import { runGold, goldUri } from "./gold.js";
 import { runPgLoad } from "./pg-load.js";
+import { runChangeDetect } from "./change-detect.js";
 import { FAA_FILES, rawKey, type FaaFile } from "../lib/config.js";
 import type { R2Credentials } from "./duckdb.js";
 
@@ -64,9 +65,10 @@ export async function runTransform(
   try {
     const { rows } = await pgPool.query<{
       pg_loaded_at: Date | null;
+      changes_detected_at: Date | null;
       master_count: number | null;
     }>(
-      `SELECT pg_loaded_at, master_count
+      `SELECT pg_loaded_at, changes_detected_at, master_count
          FROM faa_registry.snapshot_manifest
         WHERE snapshot_date = $1`,
       [snapshotDate],
@@ -75,6 +77,23 @@ export async function runTransform(
       throw new Error(
         `transform: no snapshot_manifest row for ${snapshotDate} — run the raw ingest stage first`,
       );
+    }
+    // If pg-load already committed but change-detect never finished (e.g.,
+    // prior run crashed between stages), resume just the R3 step. We need
+    // DEREG's bronze URI for that, which is cheap to derive without rerunning
+    // bronze/gold; pg-load is also idempotent so we re-derive its inputs only
+    // for path generation.
+    if (rows[0]!.pg_loaded_at != null && rows[0]!.changes_detected_at == null) {
+      const destinationsResume = buildBronzeDestinations(rootBronzeUri, snapshotDate);
+      deps.log("transform.change_detect.resume_only", { snapshotDate });
+      const changes = await runChangeDetect({
+        snapshotDate,
+        databaseUrl,
+        deregBronze: destinationsResume.DEREG,
+        r2: config.r2,
+      });
+      deps.log("transform.change_detect.done", { snapshotDate, ...changes });
+      return { skipped: false };
     }
     if (rows[0]!.pg_loaded_at != null) {
       deps.log("transform.idempotent_skip", { snapshotDate });
@@ -145,6 +164,17 @@ export async function runTransform(
       masterRejected: bronze.perTable.MASTER.rowsRejected,
     });
     deps.log("transform.pg_load.done", { snapshotDate, ...pgRes });
+
+    // R3 change detection: reads the SCD-2 state pg-load just committed and
+    // emits one `aircraft_changes` row per (n_number, change_type) for today.
+    deps.log("transform.change_detect.started", { snapshotDate });
+    const changes = await runChangeDetect({
+      snapshotDate,
+      databaseUrl,
+      deregBronze: destinations.DEREG,
+      r2: config.r2,
+    });
+    deps.log("transform.change_detect.done", { snapshotDate, ...changes });
 
     return { skipped: false };
   } finally {

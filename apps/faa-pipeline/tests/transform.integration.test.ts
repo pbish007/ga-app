@@ -33,6 +33,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 import { runBronze, bronzeUri } from "../src/transform/bronze.js";
 import { runGold, goldUri } from "../src/transform/gold.js";
 import { runPgLoad, getAircraftAsOf } from "../src/transform/pg-load.js";
+import { runChangeDetect } from "../src/transform/change-detect.js";
 import { FAA_FILES, type FaaFile } from "../src/lib/config.js";
 
 const TEST_DB_URL = process.env.FAA_TEST_DATABASE_URL;
@@ -52,6 +53,7 @@ const describeMaybe = shouldRun ? describe : describe.skip;
 
 const DAY_1 = "2026-06-01";
 const DAY_2 = "2026-06-02";
+const DAY_3 = "2026-06-03";
 
 // MASTER columns we exercise. Use FAA's exact header names; gold.ts depends
 // on them. Keep this minimal (only the columns the assertions read) — other
@@ -122,9 +124,21 @@ function emptyTxt(headerJoin: string): string {
   return headerJoin + "\n";
 }
 
+function deregTxt(nNumbers: string[]): string {
+  // Header columns DuckDB will see in the parquet; first column is N-NUMBER
+  // (change-detect reads it as `"N-NUMBER"`).
+  let out = "N-NUMBER,DEREG-DATE\n";
+  for (const n of nNumbers) {
+    out += `${n},\n`;
+  }
+  return out;
+}
+
 interface FixtureDay {
   date: string;
   master: MasterRow[];
+  /** N-numbers to put in this day's DEREG.txt fixture (R3 deregistration). */
+  dereg?: string[];
 }
 
 const FIXTURE_DAYS: FixtureDay[] = [
@@ -143,6 +157,14 @@ const FIXTURE_DAYS: FixtureDay[] = [
       { nNumber: "N-003", ownerName: "FRESH OWNER LLC" },        // new
     ],
   },
+  {
+    date: DAY_3,
+    master: [
+      { nNumber: "N-002", ownerName: "NEW OWNER LLC" },          // unchanged
+      { nNumber: "N-003", ownerName: "FRESH OWNER LLC" },        // unchanged
+    ],
+    dereg: ["N-001"],                                            // R3 deregistration
+  },
 ];
 
 describeMaybe("transform pipeline (SCD-2 + getAircraftAsOf)", () => {
@@ -157,7 +179,7 @@ describeMaybe("transform pipeline (SCD-2 + getAircraftAsOf)", () => {
     // pollute. The migration files are idempotent enough for re-runs but
     // 0031 is drop+recreate so we lean on that.
     await pool.query(`DROP SCHEMA IF EXISTS faa_registry CASCADE`);
-    const migrations = ["0022_faa_registry_schema.sql", "0025_faa_registry_manifest_fingerprints.sql", "0031_faa_registry_aircraft_scd2.sql", "0032_faa_snapshot_manifest_transform.sql"];
+    const migrations = ["0022_faa_registry_schema.sql", "0025_faa_registry_manifest_fingerprints.sql", "0031_faa_registry_aircraft_scd2.sql", "0032_faa_snapshot_manifest_transform.sql", "0034_faa_aircraft_changes_r3.sql"];
     for (const m of migrations) {
       const sql = readFileSync(join(__dirname, "..", "..", "..", "packages", "db", "migrations", m), "utf8");
       await pool.query(sql);
@@ -242,6 +264,76 @@ describeMaybe("transform pipeline (SCD-2 + getAircraftAsOf)", () => {
     }
   });
 
+  // R3 (PMB-107) — change detection runs at the tail of runOneDay.
+  it("R3: day-1 emitted new_registration for both seed aircraft", async () => {
+    const rows = await pool.query<{
+      n_number: string; change_type: string; old_value: unknown; new_value: { owner_name: string };
+    }>(
+      `SELECT n_number, change_type, old_value, new_value
+         FROM faa_registry.aircraft_changes
+        WHERE snapshot_date = $1
+        ORDER BY n_number`,
+      [DAY_1],
+    );
+    expect(rows.rows.map((r) => r.n_number)).toEqual(["N-001", "N-002"]);
+    expect(rows.rows.every((r) => r.change_type === "new_registration")).toBe(true);
+    expect(rows.rows.every((r) => r.old_value === null)).toBe(true);
+    expect(rows.rows.find((r) => r.n_number === "N-001")!.new_value.owner_name).toBe("ALICE LLC");
+  });
+
+  it("R3: day-2 emitted exactly one ownership_transfer for N-002 + one new_registration for N-003", async () => {
+    const rows = await pool.query<{
+      n_number: string; change_type: string;
+      old_value: { owner_name?: string } | null;
+      new_value: { owner_name?: string };
+    }>(
+      `SELECT n_number, change_type, old_value, new_value
+         FROM faa_registry.aircraft_changes
+        WHERE snapshot_date = $1
+        ORDER BY n_number, change_type`,
+      [DAY_2],
+    );
+    expect(rows.rows.map((r) => `${r.n_number}/${r.change_type}`).sort()).toEqual([
+      "N-002/ownership_transfer",
+      "N-003/new_registration",
+    ]);
+    const xfer = rows.rows.find((r) => r.change_type === "ownership_transfer")!;
+    expect(xfer.old_value?.owner_name).toBe("ORIG OWNER LLC");
+    expect(xfer.new_value.owner_name).toBe("NEW OWNER LLC");
+
+    // N-001 was unchanged — no change rows at all for it on day-2.
+    const n1 = await pool.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n
+         FROM faa_registry.aircraft_changes
+        WHERE snapshot_date = $1 AND n_number = 'N-001'`,
+      [DAY_2],
+    );
+    expect(n1.rows[0]!.n).toBe(0);
+  });
+
+  it("R3: rerunning change-detect for day-2 is idempotent (row counts unchanged)", async () => {
+    const before = await pool.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n
+         FROM faa_registry.aircraft_changes
+        WHERE snapshot_date = $1`,
+      [DAY_2],
+    );
+
+    await runChangeDetect({
+      snapshotDate: DAY_2,
+      databaseUrl: TEST_DB_URL!,
+      deregBronze: bronzeUri(`file://${workDir}/r2`, DAY_2, "DEREG"),
+    });
+
+    const after = await pool.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n
+         FROM faa_registry.aircraft_changes
+        WHERE snapshot_date = $1`,
+      [DAY_2],
+    );
+    expect(after.rows[0]!.n).toBe(before.rows[0]!.n);
+  }, 60_000);
+
   it("rerunning day-2 is a fast-skip (pg_loaded_at already set)", async () => {
     // First, the orchestrator-level fast skip — but we call pg-load directly
     // in this test so we just verify the manifest stamp didn't change and
@@ -274,6 +366,48 @@ describeMaybe("transform pipeline (SCD-2 + getAircraftAsOf)", () => {
     expect(live.rows[0]!.n).toBe(3);
   }, 60_000);
 
+  // R3 deregistration runs LAST because it mutates is_current state in a way
+  // that would invalidate the "live=3" invariant the day-2-rerun test asserts.
+  it("R3: day-3 DEREG fires deregistration for N-001 and flips is_current=false", async () => {
+    await runOneDay(FIXTURE_DAYS[2]!, workDir);
+
+    const change = await pool.query<{
+      change_type: string;
+      old_value: { owner_name: string };
+      new_value: { deregistered_on: string };
+    }>(
+      `SELECT change_type, old_value, new_value
+         FROM faa_registry.aircraft_changes
+        WHERE snapshot_date = $1 AND n_number = 'N-001'`,
+      [DAY_3],
+    );
+    expect(change.rows.length).toBe(1);
+    expect(change.rows[0]!.change_type).toBe("deregistration");
+    expect(change.rows[0]!.old_value.owner_name).toBe("ALICE LLC");
+
+    const hist = await pool.query<{ is_current: boolean; valid_to: Date | null }>(
+      `SELECT is_current, valid_to
+         FROM faa_registry.aircraft_registry_history
+        WHERE n_number = 'N-001'
+        ORDER BY valid_from DESC
+        LIMIT 1`,
+    );
+    expect(hist.rows[0]!.is_current).toBe(false);
+    expect(formatDate(hist.rows[0]!.valid_to)).toBe(DAY_3);
+
+    // R4 chronology query (acceptance criterion #5).
+    const chrono = await pool.query<{ snapshot_date: Date; change_type: string }>(
+      `SELECT snapshot_date, change_type
+         FROM faa_registry.aircraft_changes
+        WHERE n_number = 'N-001'
+        ORDER BY snapshot_date DESC`,
+    );
+    expect(chrono.rows.map((r) => `${formatDate(r.snapshot_date)}/${r.change_type}`)).toEqual([
+      `${DAY_3}/deregistration`,
+      `${DAY_1}/new_registration`,
+    ]);
+  }, 60_000);
+
   async function runOneDay(day: FixtureDay, root: string): Promise<void> {
     const rawDir = join(root, "raw", day.date);
     const r2Root = `file://${root}/r2`;
@@ -284,7 +418,7 @@ describeMaybe("transform pipeline (SCD-2 + getAircraftAsOf)", () => {
     writeFileSync(join(rawDir, "ACFTREF.txt"), acftrefTxt());
     writeFileSync(join(rawDir, "ENGINE.txt"), engineTxt());
     writeFileSync(join(rawDir, "DEALER.txt"), emptyTxt("DEALER,ID"));
-    writeFileSync(join(rawDir, "DEREG.txt"), emptyTxt("N-NUMBER,DEREG-DATE"));
+    writeFileSync(join(rawDir, "DEREG.txt"), deregTxt(day.dereg ?? []));
 
     const sources = Object.fromEntries(
       FAA_FILES.map((f) => [f, join(rawDir, `${f}.txt`)]),
@@ -311,6 +445,14 @@ describeMaybe("transform pipeline (SCD-2 + getAircraftAsOf)", () => {
       databaseUrl: TEST_DB_URL!,
       masterAccepted: bronze.perTable.MASTER.rowsWritten,
       masterRejected: bronze.perTable.MASTER.rowsRejected,
+    });
+
+    // R3 change detection (PMB-107). Reads the SCD-2 state pg-load just
+    // committed and emits per-type rows into aircraft_changes.
+    await runChangeDetect({
+      snapshotDate: day.date,
+      databaseUrl: TEST_DB_URL!,
+      deregBronze: bronzeUri(r2Root, day.date, "DEREG"),
     });
   }
 });
