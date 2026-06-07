@@ -67,12 +67,15 @@ export async function runPgLoad(inputs: PgLoadInputs): Promise<PgLoadResult> {
     `);
 
     // 2. Stream gold parquet → CSV via duckdb → pg COPY FROM STDIN.
-    //    DuckDB emits CSV with header by default; we skip the header in pg COPY.
+    //    `streamDuckSql` spawns duckdb with `-csv -noheader`, so a bare SELECT
+    //    emits headerless RFC-4180 CSV on stdout. (Do NOT use
+    //    `COPY (...) TO '/dev/stdout'`: DuckDB tries to open the path as a
+    //    regular file and fails with "Cannot open file /dev/stdout" on the
+    //    GH Actions runner.)
     const preamble = inputs.r2 ? r2Preamble(inputs.r2) : "";
     const exportSql = [
       preamble,
-      `COPY (SELECT ${CURRENT_COLUMNS.join(", ")} FROM read_parquet('${inputs.goldParquet}'))`,
-      `TO '/dev/stdout' (FORMAT CSV, HEADER false);`,
+      `SELECT ${CURRENT_COLUMNS.join(", ")} FROM read_parquet('${inputs.goldParquet}');`,
     ].join("\n");
 
     const duck = streamDuckSql(exportSql);
