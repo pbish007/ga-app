@@ -45,6 +45,14 @@ export {
   type SquawkWithPhotos,
 } from "./squawk-service.js";
 export {
+  AircraftFaaDecisionAircraftNotFoundError,
+  AircraftFaaDecisionService,
+  AircraftFaaDecisionValidationError,
+  normalizeNNumber,
+  sha256Hex,
+  type RecordFaaFieldDecisionInput,
+} from "./aircraft-faa-service.js";
+export {
   MaintenanceEntryAircraftNotFoundError,
   MaintenanceEntryAlreadySignedError,
   MaintenanceEntryNotAuthorizedToSignError,

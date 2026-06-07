@@ -1,9 +1,12 @@
 export * as schema from "./schema/index.js";
 export {
   MissingDatabaseUrlError,
+  MissingFaaDatabaseUrlError,
   assertSslRequired,
   getDatabaseUrl,
+  getFaaDatabaseUrl,
   requireDatabaseUrl,
+  requireFaaDatabaseUrl,
 } from "./env.js";
 export type {
   AppRoleCode,
@@ -76,14 +79,24 @@ export {
 } from "./schema/import-jobs.js";
 export type {
   Aircraft,
+  AircraftFaaFieldDecision,
   AircraftInspectionSubscription,
   AircraftRegimeChange,
   AircraftTimeSource,
+  FaaFieldDecision,
+  FaaFieldKey,
+  FaaFieldReportReason,
   NewAircraft,
+  NewAircraftFaaFieldDecision,
   NewAircraftInspectionSubscription,
   NewAircraftRegimeChange,
 } from "./schema/aircraft.js";
-export { AIRCRAFT_TIME_SOURCES } from "./schema/aircraft.js";
+export {
+  AIRCRAFT_TIME_SOURCES,
+  FAA_FIELD_DECISIONS,
+  FAA_FIELD_KEYS,
+  FAA_FIELD_REPORT_REASONS,
+} from "./schema/aircraft.js";
 export type {
   Component,
   ComponentInstallation,
