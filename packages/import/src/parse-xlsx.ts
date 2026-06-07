@@ -1,8 +1,13 @@
-import type { Readable } from "node:stream";
+import { Readable } from "node:stream";
 
 import ExcelJS from "exceljs";
 
 import type { ParsedRow } from "./parser-types.js";
+import {
+  inspectXlsxArchive,
+  resolveArchiveLimits,
+  type ArchiveLimits,
+} from "./xlsx-archive-guard.js";
 
 export interface ParseXlsxOptions {
   /**
@@ -17,6 +22,13 @@ export interface ParseXlsxOptions {
    * the operator-visible row number in their spreadsheet.
    */
   headerRowNumber?: number;
+  /**
+   * Override the archive caps used by the zip-bomb guard. Tests use
+   * this to verify boundary behaviour with a small cap. Production
+   * callers should leave this unset so {@link resolveArchiveLimits}
+   * reads `IMPORT_XLSX_MAX_UNCOMPRESSED_BYTES` from env.
+   */
+  archiveLimits?: ArchiveLimits;
 }
 
 export class XlsxParseError extends Error {
@@ -26,11 +38,19 @@ export class XlsxParseError extends Error {
   }
 }
 
+export type XlsxInput = Readable | Uint8Array | Buffer;
+
 /**
  * XLSX parser yielding one {@link ParsedRow} per non-empty data row.
  *
- * Implementation note: we buffer the input into memory and parse with
- * `Workbook.xlsx.load`. The alternative streaming reader
+ * The first operation is the PMB-193 archive guard: we buffer the
+ * input bytes and call {@link inspectXlsxArchive} BEFORE ExcelJS is
+ * allowed to touch them. The worst case (`wb.xlsx.load`) does not run
+ * on a rejected archive. The guard throws
+ * {@link XlsxArchiveRejectedError}.
+ *
+ * Implementation note: we already buffer the input into memory and
+ * parse with `Workbook.xlsx.load`. The alternative streaming reader
  * (`stream.xlsx.WorkbookReader`) does not surface merged-cell
  * metadata — `cell.isMerged` is always false — so detecting merges
  * (an acceptance requirement) is impossible there. For the V1
@@ -56,14 +76,18 @@ export class XlsxParseError extends Error {
  *     skipped.
  */
 export async function* parseXlsx(
-  input: Readable,
+  input: XlsxInput,
   options: ParseXlsxOptions = {},
 ): AsyncGenerator<ParsedRow> {
   const headerRowNumber = options.headerRowNumber ?? 1;
   const wantedSheet = options.sheetName;
 
+  const buffer = await toBuffer(input);
+  const limits = options.archiveLimits ?? resolveArchiveLimits();
+  inspectXlsxArchive(buffer, limits);
+
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.read(input);
+  await wb.xlsx.load(buffer);
 
   if (wb.worksheets.length === 0) {
     throw new XlsxParseError("XLSX contains no worksheets");
@@ -80,8 +104,6 @@ export async function* parseXlsx(
     );
   }
 
-  // Read header row once. Column positions in headers are 1-indexed
-  // to match ExcelJS' sparse `row.values` array.
   const headerRow = worksheet.getRow(headerRowNumber);
   const headers: (string | null)[] = [];
   const values = (headerRow.values as ExcelJS.CellValue[]) ?? [];
@@ -90,9 +112,6 @@ export async function* parseXlsx(
     headers.push(text === null ? null : text.trim());
   }
 
-  // eachRow iterates only over rows present in the worksheet — gaps
-  // skipped automatically. `includeEmpty: false` keeps memory and
-  // iteration bounded.
   const dataRows: ExcelJS.Row[] = [];
   worksheet.eachRow({ includeEmpty: false }, (row) => {
     if (row.number === headerRowNumber || row.number < headerRowNumber) return;
@@ -104,6 +123,16 @@ export async function* parseXlsx(
     if (cells === null) continue;
     yield { rowNumber: row.number, raw_cells: cells };
   }
+}
+
+async function toBuffer(input: XlsxInput): Promise<Buffer> {
+  if (Buffer.isBuffer(input)) return input;
+  if (input instanceof Uint8Array) return Buffer.from(input);
+  const chunks: Buffer[] = [];
+  for await (const chunk of input as Readable) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }
 
 type CellValue = string | number | boolean | null;
@@ -136,12 +165,6 @@ function readDataRow(
   return anyNonEmpty ? cells : null;
 }
 
-/**
- * Reduce an `ExcelJS.CellValue` to a JSON-friendly primitive. Formula
- * cells surface their calculated result; rich-text and hyperlink cells
- * surface their visible text. Dates are emitted as ISO date strings
- * so they flow through the same date-format coercer as CSV inputs.
- */
 function normalizeCellValue(raw: ExcelJS.CellValue): CellValue {
   if (raw === null || raw === undefined) return null;
   if (typeof raw === "string") return raw;
@@ -164,9 +187,6 @@ function normalizeCellValue(raw: ExcelJS.CellValue): CellValue {
         .join("");
     }
     if ("error" in raw) {
-      // Excel error cells (#N/A, #REF!, …) surface as a string so the
-      // mapping engine's coercer can fail loudly rather than silently
-      // treating them as null.
       return String((raw as { error: string }).error);
     }
   }

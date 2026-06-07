@@ -15,12 +15,16 @@ import {
   ImportJobCommitFailedError,
   ImportJobHasInvalidRowsError,
   ImportJobNotCommitableError,
+  XlsxArchiveRejectedError,
   applyMapping,
   createBatchState,
   getValidator,
+  inspectXlsxArchive,
   parseCsv,
   parseXlsx,
+  resolveArchiveLimits,
   validateMappingConfig,
+  type ArchiveAuditFields,
   type MappingConfig,
   type MappedRow,
   type ParsedRow,
@@ -106,6 +110,61 @@ interface ErrorBody {
 
 function jsonError(status: number, body: ErrorBody): Response {
   return NextResponse.json(body, { status });
+}
+
+/**
+ * Response for an XLSX zip-bomb rejection. Wire-tight: the body
+ * intentionally omits parser internals, archive filenames, the actor's
+ * uploaded filename, and the computed uncompressed sizes. The full
+ * audit trail goes to the server-side log only (PMB-193 / PMB-205).
+ */
+function jsonArchiveRejected(err: XlsxArchiveRejectedError): Response {
+  return NextResponse.json(
+    {
+      error: err.message,
+      code: err.code,
+      limit_bytes: err.limitBytes,
+    },
+    { status: err.httpStatus },
+  );
+}
+
+/**
+ * Server-side audit log for archive rejection — never echoed to the
+ * client. Lets incident response triage a probing campaign without
+ * giving the attacker the exact cap or tuning info.
+ */
+function logArchiveAudit(args: {
+  tenantId: string;
+  userId: string;
+  requestId: string | null;
+  originalFilename: string;
+  declaredContentType: string;
+  code: string;
+  audit: ArchiveAuditFields;
+}): void {
+  // eslint-disable-next-line no-console
+  console.warn("import.xlsx_archive_rejected", {
+    tenant_id: args.tenantId,
+    user_id: args.userId,
+    request_id: args.requestId,
+    original_filename: args.originalFilename,
+    declared_content_type: args.declaredContentType,
+    rejection_code: args.code,
+    compressed_archive_bytes: args.audit.compressedArchiveBytes,
+    total_uncompressed_bytes: args.audit.totalUncompressedBytes,
+    entry_count: args.audit.entryCount,
+    largest_entry_uncompressed_bytes: args.audit.largestEntryUncompressedBytes,
+    peak_compression_ratio: args.audit.peakCompressionRatio,
+  });
+}
+
+function looksLikeXlsx(filename: string, contentType: string): boolean {
+  return (
+    contentType.includes("spreadsheet") ||
+    contentType.includes("excel") ||
+    filename.toLowerCase().endsWith(".xlsx")
+  );
 }
 
 async function gate(
@@ -294,6 +353,31 @@ export async function handleCreateImport(
     file.type && file.type.length > 0 ? file.type : guessContentType(originalFilename);
   const body = new Uint8Array(await file.arrayBuffer());
 
+  // PMB-193: zip-bomb pre-flight for XLSX uploads. Walk the central
+  // directory and enforce the uncompressed cap BEFORE the file hits
+  // storage. First of three concentric checks (upload → parse handler
+  // → parser package) so a malicious archive cannot reach ExcelJS via
+  // any future caller.
+  if (looksLikeXlsx(originalFilename, contentType)) {
+    try {
+      inspectXlsxArchive(body, resolveArchiveLimits());
+    } catch (err) {
+      if (err instanceof XlsxArchiveRejectedError) {
+        logArchiveAudit({
+          tenantId,
+          userId: ctx.userId,
+          requestId: req.headers.get("x-request-id"),
+          originalFilename,
+          declaredContentType: contentType,
+          code: err.code,
+          audit: err.audit,
+        });
+        return jsonArchiveRejected(err);
+      }
+      throw err;
+    }
+  }
+
   // Upload the source file as a documents row (the DocumentsService
   // computes sha256 + stages the blob and inserts the documents row).
   // The acting user is the admin's session user, not the operator —
@@ -427,6 +511,31 @@ export async function handleParseImport(
     documentId: job.sourceDocumentId as string,
     tenantId: job.tenantId as string,
   });
+
+  // PMB-193: belt-and-suspenders zip-bomb gate. The upload-time gate
+  // already inspected this archive, but documents may be re-used by
+  // future routes that didn't see the upload check. Re-check at the
+  // handler/parser-package seam so the invariant holds.
+  if (looksLikeXlsx(document.originalFilename, document.contentType)) {
+    try {
+      inspectXlsxArchive(body, resolveArchiveLimits());
+    } catch (err) {
+      if (err instanceof XlsxArchiveRejectedError) {
+        logArchiveAudit({
+          tenantId: job.tenantId as string,
+          userId: ctx.userId,
+          requestId: req.headers.get("x-request-id"),
+          originalFilename: document.originalFilename,
+          declaredContentType: document.contentType,
+          code: err.code,
+          audit: err.audit,
+        });
+        await failParse(deps, importJobId, err.code, err.message);
+        return jsonArchiveRejected(err);
+      }
+      throw err;
+    }
+  }
 
   // Flip to 'validating' before doing the parse work. If anything below
   // throws, we land 'failed' with a captured cause.
