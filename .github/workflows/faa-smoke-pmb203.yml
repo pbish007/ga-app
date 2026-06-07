@@ -1,0 +1,93 @@
+name: FAA smoke PMB-203 (one-shot)
+
+# One-shot smoke verification queries for PMB-203 / PMB-206:
+#   - \d faa_registry.aircraft_registry_current  (schema + indexes)
+#   - SELECT * FROM snapshot_manifest WHERE snapshot_date = $TARGET
+#   - COUNT(*) FROM aircraft_registry_current
+#   - COUNT(*) FROM aircraft_registry_history WHERE is_current
+#   - SELECT * FROM aircraft_registry_current WHERE n_number = $N_NUMBER LIMIT 1
+#   - Latency for the spot-check SELECT (\timing on)
+#
+# Delete this workflow file after PMB-203 closes; it is intentionally narrow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot_date:
+        description: 'Snapshot date to query (YYYY-MM-DD). Empty = latest snapshot present.'
+        required: false
+        default: ''
+      n_number:
+        description: 'Tail number for spot-check (without leading N). Empty = first available.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
+      PGSSLMODE: require
+      SNAPSHOT_DATE: ${{ inputs.snapshot_date }}
+      N_NUMBER: ${{ inputs.n_number }}
+    steps:
+      - name: Confirm psql
+        run: psql --version
+
+      - name: Schema \d aircraft_registry_current
+        run: |
+          set -euo pipefail
+          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -c "\d faa_registry.aircraft_registry_current"
+
+      - name: Schema \d aircraft_registry_history
+        run: |
+          set -euo pipefail
+          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -c "\d faa_registry.aircraft_registry_history"
+
+      - name: snapshot_manifest row for target date
+        run: |
+          set -euo pipefail
+          if [ -n "${SNAPSHOT_DATE:-}" ]; then
+            if ! [[ "$SNAPSHOT_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "::error::snapshot_date must be YYYY-MM-DD"; exit 64
+            fi
+            target_sql="DATE '$SNAPSHOT_DATE'"
+          else
+            target_sql="(SELECT max(snapshot_date) FROM faa_registry.snapshot_manifest)"
+          fi
+          echo "Querying snapshot_manifest where snapshot_date = $target_sql"
+          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -c "
+            SELECT snapshot_date,
+                   master_count, acftref_count, engine_count,
+                   master_accepted, master_rejected,
+                   aircraft_history_inserts, aircraft_current_upserts,
+                   bronze_written_at, gold_written_at, pg_loaded_at,
+                   created_at
+              FROM faa_registry.snapshot_manifest
+             WHERE snapshot_date = $target_sql;
+          "
+
+      - name: Counts — current vs history(is_current)
+        run: |
+          set -euo pipefail
+          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -c "
+            SELECT (SELECT count(*) FROM faa_registry.aircraft_registry_current) AS current_count,
+                   (SELECT count(*) FROM faa_registry.aircraft_registry_history WHERE is_current) AS history_is_current_count,
+                   (SELECT count(*) FROM faa_registry.aircraft_registry_history) AS history_total_count;
+          "
+
+      - name: Spot-check single n_number (with \timing)
+        run: |
+          set -euo pipefail
+          if [ -n "${N_NUMBER:-}" ]; then
+            target_n="'$N_NUMBER'"
+          else
+            target_n="(SELECT n_number FROM faa_registry.aircraft_registry_current ORDER BY n_number LIMIT 1)"
+          fi
+          echo "Spot-check n_number = $target_n"
+          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" \
+            -c "\timing on" \
+            -c "SELECT * FROM faa_registry.aircraft_registry_current WHERE n_number = $target_n LIMIT 1;"
