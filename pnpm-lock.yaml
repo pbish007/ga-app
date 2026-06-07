@@ -53,6 +53,9 @@ importers:
       '@ga/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@ga/import':
+        specifier: workspace:*
+        version: link:../../packages/import
       '@ga/notifications':
         specifier: workspace:*
         version: link:../../packages/notifications
@@ -186,6 +189,9 @@ importers:
       '@ga/db':
         specifier: workspace:*
         version: link:../db
+      drizzle-orm:
+        specifier: 0.36.4
+        version: 0.36.4(@electric-sql/pglite@0.2.14)(@types/pg@8.20.0)(@types/react@19.0.2)(pg@8.21.0)(postgres@3.4.5)(react@19.0.0)
       exceljs:
         specifier: ^4.4.0
         version: 4.4.0
@@ -193,6 +199,9 @@ importers:
         specifier: ^5.0.7
         version: 5.0.7
     devDependencies:
+      '@electric-sql/pglite':
+        specifier: 0.2.14
+        version: 0.2.14
       '@types/node':
         specifier: 22.10.5
         version: 22.10.5

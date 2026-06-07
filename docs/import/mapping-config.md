@@ -161,9 +161,12 @@ Per-table closed list of fields the importer is allowed to populate. Anything no
 | `workPerformed`       | text                                                                | yes      | DB CHECK: non-empty after trim.                 |
 | `performedOn`         | date                                                                | yes      | ISO calendar date.                              |
 | `aircraftTotalTime`   | decimal                                                             | yes      | DB CHECK: ≥ 0.                                  |
-| `inspectionProgramId` | uuid                                                                | no       | Optional; resolves an inspection program template. |
+| `inspectionProgramId`         | uuid                                                                | no       | Optional; resolves an inspection program template. |
+| `signedAt`                    | datetime                                                            | no       | C3.5 emits an advisory when unbound; C4 gates `UNSIGNED_HISTORICAL` rows on this field. |
+| `signedByCertificateNumber`   | text                                                                | no       | C3.5 advisory + C4 gate (same as `signedAt`). |
+| `rtsTemplateCode`             | text                                                                | no       | C3.5 advisory + C4 gate (same as `signedAt`). |
 
-Sign-off fields (`signedAt`, `signedBy*`, `rts*`, `correctionOfId`) are **not** part of the importer surface. Imported entries land unsigned; the sign() flow (Epic F) handles them interactively.
+Sign-off carriers (`signedAt`, `signedByCertificateNumber`, `rtsTemplateCode`) are part of the importer surface as `required: false` catalog fields. C4 is the authoritative row-time gate for the `UNSIGNED_HISTORICAL` status. `correctionOfId` is not yet on the importer surface and remains a future-flow concern.
 
 ### `components`
 

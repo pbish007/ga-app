@@ -16,6 +16,7 @@
     "@ga/aircraft": "workspace:*",
     "@ga/compliance": "workspace:*",
     "@ga/db": "workspace:*",
+    "@ga/import": "workspace:*",
     "@ga/notifications": "workspace:*",
     "@ga/storage": "workspace:*",
     "drizzle-orm": "0.36.4",
