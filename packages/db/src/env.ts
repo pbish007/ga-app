@@ -70,3 +70,36 @@ export function assertSslRequired(url: string): void {
     );
   }
 }
+
+/**
+ * FAA Registry Postgres connection. The FAA data lives in a SEPARATE
+ * Supabase project from the tenant DB — see `reference_faa_supabase_project`
+ * and migrations 0022/0031/0032. The maintenance app reads from it
+ * read-only for the N-number lookup (PMB-109). Keeping the env var
+ * distinct from {@link DATABASE_URL} makes it impossible to accidentally
+ * route a tenant write at the FAA project (and vice versa).
+ */
+export class MissingFaaDatabaseUrlError extends Error {
+  constructor() {
+    super(
+      "FAA_DATABASE_URL is not set. " +
+        "Set it in Vercel (production) or apps/web/.env.local (development). " +
+        "It points at the FAA Supabase project (`faa_registry` schema), " +
+        "NOT the tenant DB.",
+    );
+    this.name = "MissingFaaDatabaseUrlError";
+  }
+}
+
+export function getFaaDatabaseUrl(): string | undefined {
+  const value = process.env.FAA_DATABASE_URL;
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
+export function requireFaaDatabaseUrl(): string {
+  const value = getFaaDatabaseUrl();
+  if (value === undefined) throw new MissingFaaDatabaseUrlError();
+  return value;
+}
