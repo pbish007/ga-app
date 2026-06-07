@@ -73,8 +73,8 @@ export default async function NewImportPage() {
       <h1 style={s.h1}>New import</h1>
       <p style={s.muted}>
         Backfill a tenant from a spreadsheet. Four steps: setup → map → validate
-        → commit. Empty cells are treated as "field absent" — the per-entity
-        validator decides whether that's an error.
+        → commit. Empty cells are treated as {"\"field absent\""} — the
+        per-entity validator decides whether {"that's"} an error.
       </p>
 
       <ImportWizard tenants={tenants} regimes={regimeOptions} />

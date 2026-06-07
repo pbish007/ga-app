@@ -663,7 +663,7 @@ export function ImportWizard({ tenants, regimes }: Props) {
           onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
           disabled={!step1Done}
           aria-label="Spreadsheet file"
-          style={{ marginBottom: "0.5rem" }}
+          style={{ display: "block", width: "100%", marginBottom: "0.5rem" }}
         />
         {file && (
           <p style={{ ...s.muted, fontSize: "0.9rem" }}>
@@ -1012,7 +1012,7 @@ function StepCard(props: {
         ? stepCardActive
         : stepCardDisabled;
   return (
-    <section style={style} aria-disabled={props.status === "disabled"}>
+    <section style={style}>
       <header style={stepHeader}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           <span
@@ -1051,16 +1051,7 @@ function FieldMapRow(props: {
   const isUuid = field.type === "uuid";
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(160px, 1fr) 1fr 2fr",
-        gap: "0.5rem",
-        alignItems: "start",
-        borderBottom: "1px solid #f3f4f6",
-        paddingBottom: "0.5rem",
-      }}
-    >
+    <div className="field-map-row">
       <div>
         <div style={{ fontWeight: 600 }}>
           {field.name}

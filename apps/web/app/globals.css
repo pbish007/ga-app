@@ -39,3 +39,20 @@ video {
 body {
   overflow-x: hidden;
 }
+
+/* Importer wizard: field-map row stacks on narrow viewports */
+.field-map-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 1fr 2fr;
+  gap: 0.5rem;
+  align-items: start;
+  border-bottom: 1px solid #f3f4f6;
+  padding-bottom: 0.5rem;
+}
+
+@media (max-width: 600px) {
+  .field-map-row {
+    display: flex;
+    flex-direction: column;
+  }
+}
