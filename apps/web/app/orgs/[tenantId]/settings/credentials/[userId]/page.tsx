@@ -15,6 +15,9 @@ import type {
 
 export const dynamic = "force-dynamic";
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const {
   organizations,
   organizationMemberships,
@@ -43,6 +46,7 @@ export default async function UserCredentialDetailPage({
   params: Promise<PageParams>;
 }) {
   const { tenantId, userId } = await params;
+  if (!UUID_RE.test(userId)) notFound();
 
   const data = await runPage(
     tenantId,
