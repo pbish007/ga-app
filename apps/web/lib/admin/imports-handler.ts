@@ -680,18 +680,14 @@ async function readParsedRows(
     for await (const row of parseXlsx(stream, {
       sheetName: (mappingConfig as { sheet?: string }).sheet,
     })) {
-      rows.push(coerceParsedRow(row));
+      rows.push(row);
     }
   } else {
     for await (const row of parseCsv(stream)) {
-      rows.push(coerceParsedRow(row));
+      rows.push(row);
     }
   }
   return rows;
-}
-
-function coerceParsedRow(row: ParsedRow): ParsedRow {
-  return row;
 }
 
 // ---------------------------------------------------------------------------
