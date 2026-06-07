@@ -15,6 +15,7 @@ import { sql } from "drizzle-orm";
 import { organizations, users } from "./accounts.js";
 import { aircraft } from "./aircraft.js";
 import { documents } from "./documents.js";
+import { regimes } from "./regime.js";
 
 /**
  * The closed state machine an import job traverses (PMB-157 / parent
@@ -88,6 +89,28 @@ export const importJobs = pgTable(
     sourceFilename: text("source_filename").notNull(),
     rowCount: integer("row_count").notNull().default(0),
     errorSummary: jsonb("error_summary"),
+    /**
+     * Regime the C5 commit pipeline consults for catalog lookups
+     * (RTS templates, registration grammar). Stamped at admin upload
+     * time from the operator's default regime; nullable on rows seeded
+     * directly by C5 commit-pipeline tests that bypass the upload step.
+     */
+    regimeId: uuid("regime_id").references(() => regimes.id, {
+      onDelete: "restrict",
+    }),
+    /**
+     * Target table the entire batch maps to. Stamped at admin upload
+     * time alongside the mapping config; the parse step copies it onto
+     * each `import_job_rows.target_table` so the commit dispatcher can
+     * fan out per-row.
+     */
+    targetTable: text("target_table").$type<ImportJobTargetTable>(),
+    /**
+     * Operator-supplied mapping config used by the C3 mapping engine
+     * at parse time. Persisted so a failed parse can be retried without
+     * re-supplying the config.
+     */
+    mappingConfig: jsonb("mapping_config"),
     createdByUserId: uuid("created_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -114,6 +137,9 @@ export const importJobs = pgTable(
     aircraftIdx: index("import_jobs_aircraft_idx")
       .on(t.tenantId, t.aircraftId)
       .where(sql`${t.aircraftId} is not null`),
+    tenantTargetIdx: index("import_jobs_tenant_target_idx")
+      .on(t.tenantId, t.targetTable)
+      .where(sql`${t.targetTable} is not null`),
     stateCheck: check(
       "import_jobs_state_check",
       sql`${t.state} in ('pending', 'validating', 'ready', 'committing', 'committed', 'failed', 'cancelled')`,
@@ -134,6 +160,11 @@ export const importJobs = pgTable(
       "import_jobs_committed_consistency",
       sql`(${t.committedAt} is null and ${t.committedByUserId} is null)
           or (${t.committedAt} is not null and ${t.committedByUserId} is not null)`,
+    ),
+    targetTableCheck: check(
+      "import_jobs_target_table_check",
+      sql`${t.targetTable} is null
+          or ${t.targetTable} in ('aircraft', 'maintenance_entries', 'components', 'flight_time_entries')`,
     ),
   }),
 );

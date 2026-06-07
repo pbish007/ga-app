@@ -53,6 +53,9 @@ importers:
       '@ga/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@ga/import':
+        specifier: workspace:*
+        version: link:../../packages/import
       '@ga/notifications':
         specifier: workspace:*
         version: link:../../packages/notifications
