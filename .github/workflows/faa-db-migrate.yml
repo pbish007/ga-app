@@ -72,6 +72,69 @@ jobs:
           set -euo pipefail
           psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -c "\d faa_registry.snapshot_manifest"
 
+      - name: Verify FAA registry roles (post-0034)
+        if: inputs.migration_file == '0034_faa_registry_roles.sql'
+        env:
+          FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
+          PGSSLMODE: require
+        run: |
+          set -euo pipefail
+          # Both roles exist as NOINHERIT NOLOGIN templates.
+          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -At <<'SQL'
+            SELECT rolname || ' canlogin=' || rolcanlogin || ' inherit=' || rolinherit
+            FROM pg_roles
+            WHERE rolname IN ('faa_registry_pipeline_rw','faa_registry_runtime_ro')
+            ORDER BY rolname;
+          SQL
+
+          # pipeline_rw can write; runtime_ro is SELECT-only on a representative table.
+          # has_table_privilege returns t/f per privilege; we assert by counting trues.
+          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -At <<'SQL'
+            SELECT 'pipeline_rw write privs on snapshot_manifest=' ||
+              count(*)::text || '/4'
+            FROM (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE')) v(priv)
+            WHERE has_table_privilege('faa_registry_pipeline_rw',
+              'faa_registry.snapshot_manifest', v.priv);
+
+            SELECT 'runtime_ro write privs on snapshot_manifest=' ||
+              count(*)::text || '/3 (expect 0)'
+            FROM (VALUES ('INSERT'),('UPDATE'),('DELETE')) v(priv)
+            WHERE has_table_privilege('faa_registry_runtime_ro',
+              'faa_registry.snapshot_manifest', v.priv);
+
+            SELECT 'runtime_ro SELECT on snapshot_manifest=' ||
+              has_table_privilege('faa_registry_runtime_ro',
+                'faa_registry.snapshot_manifest','SELECT')::text;
+          SQL
+
+      - name: Verify FAA registry audit log (post-0035)
+        if: inputs.migration_file == '0035_faa_registry_audit_log.sql'
+        env:
+          FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
+          PGSSLMODE: require
+        run: |
+          set -euo pipefail
+          # Table + the two non-trivial indexes (request_id + n_number/accessed_at)
+          # all exist with the columns we shipped.
+          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -c "\d faa_registry.faa_registry_audit_log"
+          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -At <<'SQL'
+            SELECT 'idx_n_number=' || count(*)::text
+            FROM pg_indexes
+            WHERE schemaname='faa_registry'
+              AND tablename='faa_registry_audit_log'
+              AND indexname='faa_registry_audit_log_n_number_accessed_at';
+
+            SELECT 'idx_request_id=' || count(*)::text
+            FROM pg_indexes
+            WHERE schemaname='faa_registry'
+              AND tablename='faa_registry_audit_log'
+              AND indexname='faa_registry_audit_log_request_id';
+
+            SELECT 'has_request_id_column=' ||
+              has_column_privilege(current_user,
+                'faa_registry.faa_registry_audit_log','request_id','SELECT')::text;
+          SQL
+
       - name: File GitHub issue on failure
         if: failure()
         uses: actions/github-script@v7
