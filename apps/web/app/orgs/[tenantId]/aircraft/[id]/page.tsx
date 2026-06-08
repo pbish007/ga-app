@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
-import { schema as dbSchema } from "@ga/db";
+import { schema as dbSchema, type OrgType } from "@ga/db";
 import {
   AircraftNotFoundError,
   AircraftRegimeChangeService,
@@ -12,13 +12,16 @@ import {
 } from "@ga/aircraft";
 
 import { FaaRegistrySection } from "../../../../../components/faa/FaaRegistrySection";
+import { OwnershipHistoryPanel } from "../../../../../components/faa/OwnershipHistoryPanel";
 import { runPage } from "../../../../../lib/page-auth";
 import {
   NOT_AIRWORTHINESS_CAUTION,
   pageShellStyles as s,
 } from "../../../../../lib/page-shell";
 
-const { regimes } = dbSchema;
+const { organizations, regimes } = dbSchema;
+
+const OWNERSHIP_PANEL_ORG_TYPES: ReadonlyArray<OrgType> = ["shop", "owner"];
 
 export const dynamic = "force-dynamic";
 
@@ -44,10 +47,16 @@ export default async function AircraftDetailPage({
       const regimeChangeSvc = new AircraftRegimeChangeService(db);
       try {
         const aircraft = await aircraftSvc.getById(ctx.tenantId, id);
-        const [installed, regimeChanges] = await Promise.all([
+        const [installed, regimeChanges, orgRow] = await Promise.all([
           componentSvc.listInstalledOnAircraft(ctx.tenantId, aircraft.id),
           regimeChangeSvc.listForAircraft(ctx.tenantId, aircraft.id),
+          db
+            .select({ orgType: organizations.orgType })
+            .from(organizations)
+            .where(eq(organizations.id, ctx.tenantId))
+            .limit(1),
         ]);
+        const orgType = (orgRow[0]?.orgType ?? null) as OrgType | null;
         const regimeIds = new Set<string>([aircraft.regimeId]);
         for (const change of regimeChanges) {
           regimeIds.add(change.fromRegimeId);
@@ -67,6 +76,7 @@ export default async function AircraftDetailPage({
           installed,
           regimeChanges,
           regimeById: Object.fromEntries(regimeByIdEntries),
+          orgType,
         };
       } catch (err) {
         if (err instanceof AircraftNotFoundError) return null;
@@ -77,8 +87,10 @@ export default async function AircraftDetailPage({
 
   if (!data) notFound();
 
-  const { aircraft, installed, regimeChanges, regimeById } = data;
+  const { aircraft, installed, regimeChanges, regimeById, orgType } = data;
   const currentRegime = regimeById[aircraft.regimeId];
+  const showOwnershipHistory =
+    orgType != null && OWNERSHIP_PANEL_ORG_TYPES.includes(orgType);
 
   return (
     <main style={s.main}>
@@ -171,6 +183,13 @@ export default async function AircraftDetailPage({
           { key: "expiration_date", label: "Expiration date", value: null },
         ]}
       />
+
+      {showOwnershipHistory ? (
+        <OwnershipHistoryPanel
+          tenantId={tenantId}
+          aircraftId={aircraft.id}
+        />
+      ) : null}
 
       <h2 style={s.h2}>Regime history ({regimeChanges.length})</h2>
       {regimeChanges.length === 0 ? (
