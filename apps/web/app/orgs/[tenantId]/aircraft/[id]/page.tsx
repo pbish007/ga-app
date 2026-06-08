@@ -11,6 +11,7 @@ import {
   type AircraftDb,
 } from "@ga/aircraft";
 
+import { FaaRegistrySection } from "../../../../../components/faa/FaaRegistrySection";
 import { runPage } from "../../../../../lib/page-auth";
 import {
   NOT_AIRWORTHINESS_CAUTION,
@@ -148,6 +149,28 @@ export default async function AircraftDetailPage({
           </tbody>
         </table>
       </div>
+
+      <h2 style={s.h2}>FAA Registry</h2>
+      <FaaRegistrySection
+        tenantId={tenantId}
+        aircraftId={aircraft.id}
+        registration={aircraft.registration}
+        tenantFields={[
+          { key: "make", label: "Make", value: aircraft.make },
+          { key: "model", label: "Model", value: aircraft.model },
+          { key: "serial_number", label: "Serial number", value: aircraft.serialNumber },
+          {
+            key: "year_manufactured",
+            label: "Year manufactured",
+            value:
+              aircraft.yearManufactured != null
+                ? String(aircraft.yearManufactured)
+                : null,
+          },
+          { key: "owner_name", label: "Owner name", value: null },
+          { key: "expiration_date", label: "Expiration date", value: null },
+        ]}
+      />
 
       <h2 style={s.h2}>Regime history ({regimeChanges.length})</h2>
       {regimeChanges.length === 0 ? (
