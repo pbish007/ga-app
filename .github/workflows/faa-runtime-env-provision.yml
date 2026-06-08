@@ -103,8 +103,8 @@ jobs:
               has_table_privilege('faa_runtime_app','faa_registry.aircraft_registry_current','UPDATE')::text;
           SQL
           )
-          if [ "$OUT" != "t|t|f|f" ]; then
-            echo "::error::privilege matrix mismatch: got '$OUT' expected 't|t|f|f'"
+          if [ "$OUT" != "true|true|false|false" ]; then
+            echo "::error::privilege matrix mismatch: got '$OUT' expected 'true|true|false|false'"
             exit 70
           fi
           echo "Privilege matrix OK: $OUT"
