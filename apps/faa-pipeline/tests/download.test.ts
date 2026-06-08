@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import AdmZip from "adm-zip";
-import { extractFromZip } from "../src/lib/download.js";
+import { downloadFaaSnapshot, extractFromZip, HttpError } from "../src/lib/download.js";
 
 function makeZip(entries: Record<string, string>): Buffer {
   const z = new AdmZip();
@@ -52,5 +52,104 @@ describe("extractFromZip", () => {
       "DEREG.txt": "h\n",
     });
     expect(() => extractFromZip(zip)).toThrow(/missing required files.*ENGINE/);
+  });
+});
+
+describe("downloadFaaSnapshot retry (PMB-110 AC5)", () => {
+  function goodZip(): Buffer {
+    const z = new AdmZip();
+    for (const f of ["MASTER", "ACFTREF", "ENGINE", "DEALER", "DEREG"]) {
+      z.addFile(`${f}.txt`, Buffer.from("h\nrow\n"));
+    }
+    return z.toBuffer();
+  }
+
+  function okResponse(body: Buffer): Response {
+    return new Response(body, { status: 200 });
+  }
+
+  it("succeeds on first try with no retry delays", async () => {
+    const sleep = vi.fn(async () => {});
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse(goodZip()));
+    const r = await downloadFaaSnapshot(
+      "https://example/zip",
+      fetchImpl as unknown as typeof fetch,
+      { sleep },
+    );
+    expect(r.zipBytes).toBeGreaterThan(0);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("retries on 503 and succeeds on the third attempt", async () => {
+    const sleep = vi.fn(async () => {});
+    const onRetry = vi.fn();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("nope", { status: 503 }))
+      .mockResolvedValueOnce(new Response("nope", { status: 503 }))
+      .mockResolvedValueOnce(okResponse(goodZip()));
+
+    const r = await downloadFaaSnapshot(
+      "https://example/zip",
+      fetchImpl as unknown as typeof fetch,
+      { sleep, onRetry, baseDelayMs: 10 },
+    );
+
+    expect(r.zipBytes).toBeGreaterThan(0);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(onRetry).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenNthCalledWith(1, 10);
+    expect(sleep).toHaveBeenNthCalledWith(2, 20);
+  });
+
+  it("retries on thrown network error", async () => {
+    const sleep = vi.fn(async () => {});
+    const fetchImpl = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("ECONNRESET"))
+      .mockResolvedValueOnce(okResponse(goodZip()));
+
+    const r = await downloadFaaSnapshot(
+      "https://example/zip",
+      fetchImpl as unknown as typeof fetch,
+      { sleep, baseDelayMs: 5 },
+    );
+    expect(r.zipBytes).toBeGreaterThan(0);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT retry on 404 (permanent)", async () => {
+    const sleep = vi.fn(async () => {});
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("not found", { status: 404 }));
+
+    await expect(
+      downloadFaaSnapshot(
+        "https://example/zip",
+        fetchImpl as unknown as typeof fetch,
+        { sleep, baseDelayMs: 5 },
+      ),
+    ).rejects.toBeInstanceOf(HttpError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("gives up after maxAttempts on persistent transient failure", async () => {
+    const sleep = vi.fn(async () => {});
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response("nope", { status: 503 }));
+
+    await expect(
+      downloadFaaSnapshot(
+        "https://example/zip",
+        fetchImpl as unknown as typeof fetch,
+        { sleep, baseDelayMs: 5, maxAttempts: 3 },
+      ),
+    ).rejects.toBeInstanceOf(HttpError);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(sleep).toHaveBeenCalledTimes(2);
   });
 });
