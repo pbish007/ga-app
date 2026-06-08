@@ -16,6 +16,28 @@ export const colorTokens = {
 } as const;
 
 /**
+ * Semantic tokens proposed by the FAA-prefill UX pattern (PMB-112).
+ * Kept separate from {@link colorTokens} so the chip/pill can render
+ * without hardcoded hex while leaving the credential/status palette
+ * untouched. Rename consistently across all surfaces if these names
+ * change later.
+ */
+export const faaTokens = {
+  surfaceWarningSubtle: colorTokens.warningBg,
+  surfaceInfoSubtle: "#eff6ff",
+  surfaceNeutralSubtle: "#f9fafb",
+  textWarningStrong: "#b45309",
+  textInfo: "#1d4ed8",
+  textSecondary: "#6b7280",
+  warningBorder: colorTokens.warning,
+  actionPrimaryBg: "#2563eb",
+  actionPrimaryFg: "#ffffff",
+  actionSecondaryBg: "#ffffff",
+  actionSecondaryFg: "#1f2937",
+  actionSecondaryBorder: "#d1d5db",
+} as const;
+
+/**
  * Shared inline-styles for MVP server-rendered pages (I1.1 design-system baseline).
  *
  * Mobile-first constraints:
