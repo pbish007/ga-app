@@ -237,3 +237,92 @@ export const aircraftRegimeChanges = pgTable(
 export type AircraftRegimeChange = typeof aircraftRegimeChanges.$inferSelect;
 export type NewAircraftRegimeChange =
   typeof aircraftRegimeChanges.$inferInsert;
+
+/**
+ * Decision kinds the operator can take on a per-field FAA Registry
+ * prefill conflict. Mirrors the UX pattern's `FaaFieldState` union for
+ * the three terminal user-driven states (PMB-112). `loading`, `aligned`,
+ * `conflict`, and `no_faa_data` are derived at request time and not
+ * persisted — only an explicit user decision lands here.
+ */
+export const FAA_FIELD_DECISIONS = [
+  "accepted_faa",
+  "tenant_wins",
+  "faa_reported_wrong",
+] as const;
+export type FaaFieldDecision = (typeof FAA_FIELD_DECISIONS)[number];
+
+export const FAA_FIELD_REPORT_REASONS = [
+  "registry_typo",
+  "stale_data",
+  "wrong_tail",
+  "other",
+] as const;
+export type FaaFieldReportReason = (typeof FAA_FIELD_REPORT_REASONS)[number];
+
+/**
+ * Canonical keys for the FAA-prefillable fields on the aircraft form.
+ * Defined here (not the FAA pipeline) because the decision-log grain
+ * is tenant-side, and the FE/BE form contract is the one that decides
+ * which fields are even prefillable in the MVP.
+ *
+ * Adding a new key: extend this array AND surface it in the FE chip
+ * mapping. The DB column is plain text so no schema migration is
+ * required — the application boundary is the validator.
+ */
+export const FAA_FIELD_KEYS = [
+  "make",
+  "model",
+  "serial_number",
+  "year_manufactured",
+  "owner_name",
+  "expiration_date",
+] as const;
+export type FaaFieldKey = (typeof FAA_FIELD_KEYS)[number];
+
+export const aircraftFaaFieldDecisions = pgTable(
+  "aircraft_faa_field_decisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    aircraftId: uuid("aircraft_id")
+      .notNull()
+      .references(() => aircraft.id, { onDelete: "cascade" }),
+    nNumber: text("n_number").notNull(),
+    fieldKey: text("field_key").$type<FaaFieldKey>().notNull(),
+    decision: text("decision").$type<FaaFieldDecision>().notNull(),
+    faaValue: text("faa_value"),
+    /**
+     * sha256 of {@link faaValue} at decision time, lowercase hex. The
+     * pipeline's nightly sync uses this to honor the anti-nag invariant
+     * (PMB-112 AC3) — only re-open a chip if the FAA value's hash has
+     * moved off this pinned value.
+     */
+    faaValueHash: text("faa_value_hash").notNull(),
+    tenantValue: text("tenant_value"),
+    reportReason: text("report_reason").$type<FaaFieldReportReason>(),
+    reportNote: text("report_note"),
+    decidedByUserId: uuid("decided_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("aircraft_faa_field_decisions_tenant_idx").on(t.tenantId),
+    nNumberIdx: index("aircraft_faa_field_decisions_n_number_idx").on(
+      t.nNumber,
+    ),
+    aircraftFieldUnique: uniqueIndex(
+      "aircraft_faa_field_decisions_aircraft_field_unique",
+    ).on(t.aircraftId, t.fieldKey),
+  }),
+);
+
+export type AircraftFaaFieldDecision =
+  typeof aircraftFaaFieldDecisions.$inferSelect;
+export type NewAircraftFaaFieldDecision =
+  typeof aircraftFaaFieldDecisions.$inferInsert;
