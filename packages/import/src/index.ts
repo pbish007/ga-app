@@ -13,4 +13,18 @@ export {
   parseXlsx,
   XlsxParseError,
   type ParseXlsxOptions,
+  type XlsxInput,
 } from "./parse-xlsx.js";
+export {
+  XlsxArchiveRejectedError,
+  inspectXlsxArchive,
+  resolveArchiveLimits,
+  DEFAULT_MAX_UNCOMPRESSED_BYTES,
+  HARD_MAX_UNCOMPRESSED_BYTES,
+  MAX_ENTRY_COUNT,
+  MAX_COMPRESSION_RATIO,
+  ENV_MAX_UNCOMPRESSED,
+  type ArchiveLimits,
+  type ArchiveAuditFields,
+  type ArchiveRejectionCode,
+} from "./xlsx-archive-guard.js";
