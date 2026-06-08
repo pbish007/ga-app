@@ -1,0 +1,216 @@
+name: FAA runtime env provision (one-shot)
+
+# PMB-221: provision the `faa_runtime_app` login user, grant it membership in
+# `faa_registry_runtime_ro` (created by migration 0034_faa_registry_roles.sql),
+# then push the resulting read-only pooler URL to Vercel production as
+# `FAA_DATABASE_URL` and redeploy.
+#
+# Re-runnable: the role-create is idempotent and ALTER ROLE rotates the
+# password on each run. The Vercel API step deletes any prior production
+# value of FAA_DATABASE_URL before re-adding the fresh secret.
+#
+# Why a workflow instead of a manual psql/vercel session: the superuser
+# `FAA_DATABASE_URL` only exists as a GH Actions secret. Provisioning a
+# downstream role + setting a Vercel secret in one workflow keeps the
+# pipeline credential off any operator's machine.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: faa-runtime-env-provision
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: team_hT90B7bAfiEDDY73Q3ul8t75
+      VERCEL_PROJECT_ID: prj_Z8UAfPx4m73Kt1xp2SL9sLZW7OUc
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Generate runtime user password
+        id: pw
+        run: |
+          set -euo pipefail
+          # 64-char hex: URL-safe and SQL-safe with zero escaping.
+          PW=$(openssl rand -hex 32)
+          echo "::add-mask::$PW"
+          echo "pw=$PW" >> "$GITHUB_OUTPUT"
+
+      - name: Create or rotate faa_runtime_app role
+        env:
+          FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
+          NEW_PW: ${{ steps.pw.outputs.pw }}
+          PGSSLMODE: require
+        run: |
+          set -euo pipefail
+          if [ -z "${FAA_DATABASE_URL:-}" ]; then
+            echo "::error::FAA_DATABASE_URL secret is not set."; exit 64
+          fi
+          # NB: `faa_registry_runtime_ro` is NOINHERIT NOLOGIN by design
+          # (migration 0034). `faa_runtime_app` is the LOGIN+INHERIT carrier:
+          # inheriting membership lets us serve SELECT-only privileges to the
+          # web app without ever logging in as the superuser, and lets us
+          # rotate the password independently of the ACL.
+          psql --set ON_ERROR_STOP=1 --no-psqlrc --quiet "$FAA_DATABASE_URL" \
+            -v new_pw="$NEW_PW" <<'SQL'
+            do $$
+            begin
+              if not exists (select 1 from pg_roles where rolname = 'faa_runtime_app') then
+                create role faa_runtime_app login inherit;
+              end if;
+            end $$;
+            alter role faa_runtime_app with login inherit password :'new_pw';
+            grant faa_registry_runtime_ro to faa_runtime_app;
+          SQL
+
+      - name: Verify least-privilege grants on faa_runtime_app
+        env:
+          FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
+          PGSSLMODE: require
+        run: |
+          set -euo pipefail
+          # Use the superuser connection to assert the privilege matrix that
+          # the new role inherits via faa_registry_runtime_ro. has_*_privilege
+          # is the source of truth — testing via a real INSERT would conflate
+          # ACL denial with NOT NULL constraint failures.
+          psql --set ON_ERROR_STOP=1 --no-psqlrc -At "$FAA_DATABASE_URL" <<'SQL'
+            select 'select_on_current=' ||
+              has_table_privilege('faa_runtime_app',
+                'faa_registry.aircraft_registry_current','SELECT')::text;
+            select 'select_on_manifest=' ||
+              has_table_privilege('faa_runtime_app',
+                'faa_registry.snapshot_manifest','SELECT')::text;
+            select 'insert_on_manifest=' ||
+              has_table_privilege('faa_runtime_app',
+                'faa_registry.snapshot_manifest','INSERT')::text;
+            select 'update_on_current=' ||
+              has_table_privilege('faa_runtime_app',
+                'faa_registry.aircraft_registry_current','UPDATE')::text;
+          SQL
+          # Assert the expected matrix: SELECT=t everywhere, INSERT/UPDATE=f.
+          OUT=$(psql --set ON_ERROR_STOP=1 --no-psqlrc -At "$FAA_DATABASE_URL" <<'SQL'
+            select
+              has_table_privilege('faa_runtime_app','faa_registry.aircraft_registry_current','SELECT')::text || '|' ||
+              has_table_privilege('faa_runtime_app','faa_registry.snapshot_manifest','SELECT')::text || '|' ||
+              has_table_privilege('faa_runtime_app','faa_registry.snapshot_manifest','INSERT')::text || '|' ||
+              has_table_privilege('faa_runtime_app','faa_registry.aircraft_registry_current','UPDATE')::text;
+          SQL
+          )
+          if [ "$OUT" != "t|t|f|f" ]; then
+            echo "::error::privilege matrix mismatch: got '$OUT' expected 't|t|f|f'"
+            exit 70
+          fi
+          echo "Privilege matrix OK: $OUT"
+
+      - name: Smoke-test runtime URL (SELECT n_number=100)
+        env:
+          NEW_PW: ${{ steps.pw.outputs.pw }}
+          PGSSLMODE: require
+        run: |
+          set -euo pipefail
+          # Build the runtime URL using the same pooler shape as the pipeline
+          # (txn-mode 6543 + search_path scoped to faa_registry).
+          RUNTIME_URL="postgres://faa_runtime_app.idjhuqubjgjloywsfgtu:${NEW_PW}@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&options=-c%20search_path%3Dfaa_registry"
+          echo "::add-mask::$RUNTIME_URL"
+          # The route in PMB-220 reads n_number = '100' as its smoke target.
+          # If this returns 1, the runtime path is wired end-to-end.
+          ROW=$(psql --set ON_ERROR_STOP=1 --no-psqlrc -At "$RUNTIME_URL" \
+            -c "select count(*) from aircraft_registry_current where n_number = '100';")
+          if [ "$ROW" != "1" ]; then
+            echo "::error::expected 1 row for n_number='100', got '$ROW'"
+            exit 71
+          fi
+          echo "Runtime URL OK: n_number=100 returned 1 row."
+          # Stash for the next step (still masked).
+          echo "RUNTIME_URL=$RUNTIME_URL" >> "$GITHUB_ENV"
+
+      - name: Set FAA_DATABASE_URL in Vercel production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RUNTIME_URL:-}" ]; then
+            echo "::error::RUNTIME_URL is not set"; exit 64
+          fi
+          TEAM_QS="teamId=${VERCEL_ORG_ID}"
+          # 1) Find any existing prod FAA_DATABASE_URL and delete (idempotent re-runs).
+          EXISTING=$(curl -fsS \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env?${TEAM_QS}&decrypt=false" \
+            | jq -r '.envs[] | select(.key=="FAA_DATABASE_URL" and (.target|index("production"))) | .id')
+          for ID in $EXISTING; do
+            echo "Removing prior FAA_DATABASE_URL env id $ID"
+            curl -fsS -X DELETE \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env/${ID}?${TEAM_QS}" \
+              > /dev/null
+          done
+
+          # 2) Create new sensitive prod env var.
+          # type=sensitive: required for prod DB credentials; build pipeline
+          # uses `vercel deploy --prod` (server-side build), which is compatible
+          # with sensitive vars (see reference_vercel_sensitive_env_vars.md).
+          PAYLOAD=$(jq -n --arg v "$RUNTIME_URL" '{
+            key: "FAA_DATABASE_URL",
+            value: $v,
+            type: "sensitive",
+            target: ["production"],
+            comment: "Read-only runtime role (faa_runtime_app -> faa_registry_runtime_ro). PMB-221."
+          }')
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env?${TEAM_QS}" \
+            > /dev/null
+          echo "FAA_DATABASE_URL set in Vercel production."
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Redeploy production
+        run: |
+          set -euo pipefail
+          vercel pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}"
+          vercel deploy --prod --token="${{ secrets.VERCEL_TOKEN }}" --yes
+
+      - name: File GitHub issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+        with:
+          script: |
+            const workflow = process.env.WORKFLOW_NAME;
+            const sha = context.sha.substring(0, 7);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `Workflow failed: ${workflow} @ ${sha}`;
+            const body = [
+              `**Workflow:** ${workflow}`,
+              `**Commit:** ${context.sha}`,
+              `**Ref:** ${context.ref}`,
+              `**Actor:** @${context.actor}`,
+              `**Run:** ${runUrl}`,
+              ``,
+              `Filed automatically by the failure-notification step. See \`docs/runbooks/observability.md\`.`,
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['ops', 'workflow-failure'],
+              assignees: ['pbish007'],
+            });
