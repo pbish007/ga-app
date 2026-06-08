@@ -87,7 +87,15 @@ export async function* parseXlsx(
   inspectXlsxArchive(buffer, limits);
 
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer);
+  // ExcelJS's load() has an ArrayBuffer overload; using it sidesteps
+  // the Node 22 generic-`Buffer<ArrayBufferLike>` mismatch with
+  // ExcelJS's non-generic `Buffer` typing. The buffer was already
+  // fully materialised by toBuffer().
+  const ab = buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength,
+  );
+  await wb.xlsx.load(ab as ArrayBuffer);
 
   if (wb.worksheets.length === 0) {
     throw new XlsxParseError("XLSX contains no worksheets");
