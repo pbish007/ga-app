@@ -1,17 +1,7 @@
 name: FAA public-schema inventory (one-shot)
 
 # Read-only inventory of the FAA Supabase project's `public` schema to
-# drive the PMB-232 RLS fix. Supabase auto-exposes `public` via PostgREST
-# under the anon key, so anything in `public` with RLS disabled is
-# implicitly readable. This workflow prints every relation + RLS status
-# + row count so we can decide drop / move / lock per table.
-#
-# Safe to re-run: pure SELECTs. Distinct from faa-db-migrate.yml.
-#
-# Implementation note: writes SQL to a temp file and uses `psql --file=`
-# (matching the proven faa-db-migrate.yml pattern), instead of stdin
-# heredoc, which on this runner failed to deliver the conninfo URL
-# correctly and fell back to a local socket.
+# drive the PMB-232 RLS fix.
 
 on:
   workflow_dispatch: {}
@@ -32,16 +22,55 @@ jobs:
       - name: Confirm psql is available
         run: psql --version
 
+      - name: Diagnose conninfo (no value reveal)
+        env:
+          FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
+        run: |
+          set -eu
+          if [ -z "${FAA_DATABASE_URL:-}" ]; then
+            echo "::error::FAA_DATABASE_URL is empty"; exit 64
+          fi
+          len="${#FAA_DATABASE_URL}"
+          # Detect leading scheme without revealing secret content.
+          case "$FAA_DATABASE_URL" in
+            postgres://*)   scheme=postgres ;;
+            postgresql://*) scheme=postgresql ;;
+            *)              scheme=other ;;
+          esac
+          # Detect a couple of structural markers that affect parsing.
+          case "$FAA_DATABASE_URL" in *"?"*) has_query=yes ;; *) has_query=no ;; esac
+          case "$FAA_DATABASE_URL" in *"@"*) has_at=yes ;; *) has_at=no ;; esac
+          case "$FAA_DATABASE_URL" in *" "*) has_space=yes ;; *) has_space=no ;; esac
+          # Newlines are very common via copy-paste through the GH UI.
+          # Detect a trailing newline without printing the body.
+          if printf '%s' "$FAA_DATABASE_URL" | od -c | tail -1 | grep -q '\\n'; then
+            has_trailing_nl=yes
+          else
+            has_trailing_nl=no
+          fi
+          echo "URL_LEN=$len SCHEME=$scheme HAS_QUERY=$has_query HAS_AT=$has_at HAS_SPACE=$has_space HAS_TRAILING_NL=$has_trailing_nl"
+
+      - name: Probe connection with select 1
+        env:
+          FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
+          PGSSLMODE: require
+        run: |
+          set -eu
+          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" -c "select 1 as ok;" || {
+            ec=$?
+            echo "::warning::probe with raw URL failed ec=$ec, retrying with trimmed URL"
+            # Strip leading/trailing whitespace including CR/LF
+            trimmed="$(printf '%s' "$FAA_DATABASE_URL" | tr -d '\r\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+            psql --set ON_ERROR_STOP=1 --no-psqlrc "$trimmed" -c "select 1 as ok_trimmed;"
+          }
+
       - name: Inventory public schema
         env:
           FAA_DATABASE_URL: ${{ secrets.FAA_DATABASE_URL }}
           PGSSLMODE: require
         run: |
           set -euo pipefail
-          if [ -z "${FAA_DATABASE_URL:-}" ]; then
-            echo "::error::FAA_DATABASE_URL secret is not set."; exit 64
-          fi
-
+          trimmed="$(printf '%s' "$FAA_DATABASE_URL" | tr -d '\r\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
           sql_file="$(mktemp --suffix=.sql)"
           cat > "$sql_file" <<'SQL'
           \echo ============================================================
@@ -109,9 +138,7 @@ jobs:
           \echo ============================================================
           \echo Extensions and their install schema:
           \echo ============================================================
-          select e.extname,
-                 n.nspname as schema,
-                 e.extversion
+          select e.extname, n.nspname as schema, e.extversion
           from pg_extension e
           join pg_namespace n on n.oid = e.extnamespace
           order by n.nspname, e.extname;
@@ -135,6 +162,5 @@ jobs:
             and grantee in ('anon','authenticated','public');
           SQL
 
-          psql --set ON_ERROR_STOP=1 --no-psqlrc --quiet "$FAA_DATABASE_URL" \
-            --file="$sql_file"
+          psql --set ON_ERROR_STOP=1 --no-psqlrc --quiet "$trimmed" --file="$sql_file"
           rm -f "$sql_file"
