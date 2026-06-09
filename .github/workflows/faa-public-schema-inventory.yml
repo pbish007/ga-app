@@ -7,6 +7,11 @@ name: FAA public-schema inventory (one-shot)
 # + row count so we can decide drop / move / lock per table.
 #
 # Safe to re-run: pure SELECTs. Distinct from faa-db-migrate.yml.
+#
+# Implementation note: writes SQL to a temp file and uses `psql --file=`
+# (matching the proven faa-db-migrate.yml pattern), instead of stdin
+# heredoc, which on this runner failed to deliver the conninfo URL
+# correctly and fell back to a local socket.
 
 on:
   workflow_dispatch: {}
@@ -22,6 +27,8 @@ jobs:
   inventory:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+
       - name: Confirm psql is available
         run: psql --version
 
@@ -34,107 +41,100 @@ jobs:
           if [ -z "${FAA_DATABASE_URL:-}" ]; then
             echo "::error::FAA_DATABASE_URL secret is not set."; exit 64
           fi
-          echo "============================================================"
-          echo "Relations in public (pg_class):"
-          echo "============================================================"
-          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" <<'SQL'
-            select
-              n.nspname  as schema,
-              c.relname  as relation,
-              case c.relkind
-                when 'r' then 'table'
-                when 'p' then 'partitioned table'
-                when 'v' then 'view'
-                when 'm' then 'materialized view'
-                when 'f' then 'foreign table'
-                when 'S' then 'sequence'
-                when 'i' then 'index'
-                else c.relkind::text
-              end as kind,
-              c.relrowsecurity as rls_enabled,
-              c.relforcerowsecurity as rls_forced,
-              pg_size_pretty(pg_total_relation_size(c.oid)) as total_size,
-              obj_description(c.oid, 'pg_class') as comment
-            from pg_class c
-            join pg_namespace n on n.oid = c.relnamespace
-            where n.nspname = 'public'
-              and c.relkind in ('r','p','v','m','f','S')
-            order by c.relkind, c.relname;
+
+          sql_file="$(mktemp --suffix=.sql)"
+          cat > "$sql_file" <<'SQL'
+          \echo ============================================================
+          \echo Relations in public (pg_class):
+          \echo ============================================================
+          select
+            n.nspname  as schema,
+            c.relname  as relation,
+            case c.relkind
+              when 'r' then 'table'
+              when 'p' then 'partitioned table'
+              when 'v' then 'view'
+              when 'm' then 'materialized view'
+              when 'f' then 'foreign table'
+              when 'S' then 'sequence'
+              else c.relkind::text
+            end as kind,
+            c.relrowsecurity as rls_enabled,
+            c.relforcerowsecurity as rls_forced,
+            pg_size_pretty(pg_total_relation_size(c.oid)) as total_size,
+            obj_description(c.oid, 'pg_class') as comment
+          from pg_class c
+          join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'public'
+            and c.relkind in ('r','p','v','m','f','S')
+          order by c.relkind, c.relname;
+
+          \echo ============================================================
+          \echo information_schema.tables (matches Supabase advisor scope):
+          \echo ============================================================
+          select table_schema, table_name, table_type
+          from information_schema.tables
+          where table_schema = 'public'
+          order by table_type, table_name;
+
+          \echo ============================================================
+          \echo RLS policies on public.*:
+          \echo ============================================================
+          select schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check
+          from pg_policies
+          where schemaname = 'public'
+          order by tablename, policyname;
+
+          \echo ============================================================
+          \echo Row counts per table in public:
+          \echo ============================================================
+          do $$
+          declare
+            r record;
+            cnt bigint;
+          begin
+            for r in
+              select n.nspname as s, c.relname as t
+              from pg_class c
+              join pg_namespace n on n.oid = c.relnamespace
+              where n.nspname = 'public' and c.relkind in ('r','p')
+              order by c.relname
+            loop
+              execute format('select count(*) from %I.%I', r.s, r.t) into cnt;
+              raise notice '% . % => % rows', r.s, r.t, cnt;
+            end loop;
+          end;
+          $$;
+
+          \echo ============================================================
+          \echo Extensions and their install schema:
+          \echo ============================================================
+          select e.extname,
+                 n.nspname as schema,
+                 e.extversion
+          from pg_extension e
+          join pg_namespace n on n.oid = e.extnamespace
+          order by n.nspname, e.extname;
+
+          \echo ============================================================
+          \echo Table grants on public.* for anon / authenticated / public:
+          \echo ============================================================
+          select grantee, table_name, privilege_type
+          from information_schema.role_table_grants
+          where table_schema = 'public'
+            and grantee in ('anon','authenticated','public')
+          order by grantee, table_name, privilege_type;
+
+          \echo ============================================================
+          \echo Schema USAGE grants on public:
+          \echo ============================================================
+          select grantee, privilege_type
+          from information_schema.usage_privileges
+          where object_schema = 'public'
+            and object_type = 'SCHEMA'
+            and grantee in ('anon','authenticated','public');
           SQL
 
-          echo "============================================================"
-          echo "information_schema.tables view (matches Supabase advisor scope):"
-          echo "============================================================"
-          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" <<'SQL'
-            select table_schema, table_name, table_type
-            from information_schema.tables
-            where table_schema = 'public'
-            order by table_type, table_name;
-          SQL
-
-          echo "============================================================"
-          echo "RLS policies on public.*:"
-          echo "============================================================"
-          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" <<'SQL'
-            select schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check
-            from pg_policies
-            where schemaname = 'public'
-            order by tablename, policyname;
-          SQL
-
-          echo "============================================================"
-          echo "Row counts per table in public:"
-          echo "============================================================"
-          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" <<'SQL'
-            do $$
-            declare
-              r record;
-              cnt bigint;
-            begin
-              for r in
-                select n.nspname as s, c.relname as t
-                from pg_class c
-                join pg_namespace n on n.oid = c.relnamespace
-                where n.nspname = 'public' and c.relkind in ('r','p')
-                order by c.relname
-              loop
-                execute format('select count(*) from %I.%I', r.s, r.t) into cnt;
-                raise notice '% . % => % rows', r.s, r.t, cnt;
-              end loop;
-            end;
-            $$;
-          SQL
-
-          echo "============================================================"
-          echo "Extensions and their install schema:"
-          echo "============================================================"
-          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" <<'SQL'
-            select e.extname,
-                   n.nspname as schema,
-                   e.extversion
-            from pg_extension e
-            join pg_namespace n on n.oid = e.extnamespace
-            order by n.nspname, e.extname;
-          SQL
-
-          echo "============================================================"
-          echo "Default privileges on public for anon / authenticated:"
-          echo "============================================================"
-          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" <<'SQL'
-            select grantee, table_name, privilege_type
-            from information_schema.role_table_grants
-            where table_schema = 'public'
-              and grantee in ('anon','authenticated','public')
-            order by grantee, table_name, privilege_type;
-          SQL
-
-          echo "============================================================"
-          echo "Schema grants on public to anon / authenticated:"
-          echo "============================================================"
-          psql --set ON_ERROR_STOP=1 --no-psqlrc "$FAA_DATABASE_URL" <<'SQL'
-            select grantee, privilege_type
-            from information_schema.usage_privileges
-            where object_schema = 'public'
-              and object_type = 'SCHEMA'
-              and grantee in ('anon','authenticated','public');
-          SQL
+          psql --set ON_ERROR_STOP=1 --no-psqlrc --quiet "$FAA_DATABASE_URL" \
+            --file="$sql_file"
+          rm -f "$sql_file"
