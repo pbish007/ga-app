@@ -368,10 +368,18 @@ describe("PMB-157 importer schema (migration 0028)", () => {
   });
 
   describe("tenant isolation under app_isolation policy", () => {
-    it("scopes import_jobs reads to the active tenant", async () => {
-      const tenantA = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-      const tenantB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-      const userId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+    // Two-tenant + one-user fixture for the cross-tenant cases below. All
+    // negative tests share this shape: seed under the bootstrap role
+    // (BYPASSRLS, so FORCE RLS does not block the seed), then `set role
+    // tenant_app` + GUC=tenantA so the policy is what's exercising the
+    // assertion. PMB-195: defense-in-depth on the BOLA invariant — locks
+    // in the WITH CHECK predicate so a future migration cannot silently
+    // drop or weaken it without CI catching it.
+    const tenantA = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const tenantB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    const userId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+
+    async function seedTwoTenants(): Promise<void> {
       await db.execute(sql`
         insert into organizations (id, name, org_type, default_regime_id)
         select ${tenantA}::uuid, 'tenantA', 'owner', id from regimes where code = 'FAA'
@@ -381,6 +389,17 @@ describe("PMB-157 importer schema (migration 0028)", () => {
       await db.execute(sql`
         insert into users (id, email) values (${userId}, 'u@example.test')
       `);
+    }
+
+    async function pinAsTenantApp(tenantId: string): Promise<void> {
+      await db.$client.exec(
+        `select set_config('app.current_tenant_id', '${tenantId}', false);`,
+      );
+      await db.$client.exec(`set role ${TENANT_APP_ROLE};`);
+    }
+
+    it("scopes import_jobs reads to the active tenant", async () => {
+      await seedTwoTenants();
       await db.execute(sql`
         insert into import_jobs
           (tenant_id, import_kind, source_filename, created_by_user_id)
@@ -388,14 +407,103 @@ describe("PMB-157 importer schema (migration 0028)", () => {
           (${tenantA}, 'aircraft', 'a.csv', ${userId}),
           (${tenantB}, 'aircraft', 'b.csv', ${userId})
       `);
-      await db.$client.exec(
-        `select set_config('app.current_tenant_id', '${tenantA}', false);`,
-      );
-      await db.$client.exec(`set role ${TENANT_APP_ROLE};`);
+      await pinAsTenantApp(tenantA);
       const visible = await db.execute<{ count: string }>(
         sql`select count(*)::text as count from import_jobs`,
       );
       expect(Number(visible.rows[0]!.count)).toBe(1);
+    });
+
+    it("scopes import_job_rows reads to the active tenant", async () => {
+      await seedTwoTenants();
+      const jobs = await db.execute<{ id: string; tenant_id: string }>(sql`
+        insert into import_jobs
+          (tenant_id, import_kind, source_filename, created_by_user_id)
+        values
+          (${tenantA}, 'aircraft', 'a.csv', ${userId}),
+          (${tenantB}, 'aircraft', 'b.csv', ${userId})
+        returning id, tenant_id
+      `);
+      const jobA = jobs.rows.find((r) => r.tenant_id === tenantA)!.id;
+      const jobB = jobs.rows.find((r) => r.tenant_id === tenantB)!.id;
+      await db.execute(sql`
+        insert into import_job_rows
+          (tenant_id, import_job_id, source_row_number, source_payload)
+        values
+          (${tenantA}, ${jobA}, 1, '{}'::jsonb),
+          (${tenantB}, ${jobB}, 1, '{}'::jsonb)
+      `);
+      await pinAsTenantApp(tenantA);
+      const visible = await db.execute<{ count: string }>(
+        sql`select count(*)::text as count from import_job_rows`,
+      );
+      expect(Number(visible.rows[0]!.count)).toBe(1);
+    });
+
+    it("rejects a cross-tenant INSERT on import_jobs (WITH CHECK)", async () => {
+      await seedTwoTenants();
+      await pinAsTenantApp(tenantA);
+      // tenant_app pinned to A tries to plant a job under tenant B. The
+      // policy's WITH CHECK predicate compares the *new* row's tenant_id
+      // to the GUC and rejects with SQLSTATE 42501 / "new row violates
+      // row-level security policy". This is the canonical BOLA defense at
+      // the staging layer.
+      await expect(
+        db.execute(sql`
+          insert into import_jobs
+            (tenant_id, import_kind, source_filename, created_by_user_id)
+          values
+            (${tenantB}, 'aircraft', 'evil.csv', ${userId})
+        `),
+      ).rejects.toThrow(/row-level security|policy/i);
+    });
+
+    it("rejects a cross-tenant INSERT on import_job_rows (WITH CHECK)", async () => {
+      await seedTwoTenants();
+      // Parent job lives under tenant A. Seeding it as the bootstrap
+      // role keeps the FK valid for the negative INSERT below; the test
+      // is about the per-row WITH CHECK, not the FK.
+      const job = await db.execute<{ id: string }>(sql`
+        insert into import_jobs
+          (tenant_id, import_kind, source_filename, created_by_user_id)
+        values
+          (${tenantA}, 'aircraft', 'a.csv', ${userId})
+        returning id
+      `);
+      const jobId = job.rows[0]!.id;
+      await pinAsTenantApp(tenantA);
+      await expect(
+        db.execute(sql`
+          insert into import_job_rows
+            (tenant_id, import_job_id, source_row_number, source_payload)
+          values
+            (${tenantB}, ${jobId}, 1, '{}'::jsonb)
+        `),
+      ).rejects.toThrow(/row-level security|policy/i);
+    });
+
+    it("rejects a cross-tenant UPDATE that flips tenant_id on import_jobs (WITH CHECK)", async () => {
+      await seedTwoTenants();
+      const job = await db.execute<{ id: string }>(sql`
+        insert into import_jobs
+          (tenant_id, import_kind, source_filename, created_by_user_id)
+        values
+          (${tenantA}, 'aircraft', 'a.csv', ${userId})
+        returning id
+      `);
+      const jobId = job.rows[0]!.id;
+      await pinAsTenantApp(tenantA);
+      // USING matches (row.tenant_id = A = GUC), so the UPDATE finds the
+      // row; WITH CHECK rejects the *new* tenant_id (B != GUC). Without
+      // this assertion, a future migration could relax WITH CHECK and let
+      // an attacker re-parent a job they already own into another tenant.
+      await expect(
+        db.execute(sql`
+          update import_jobs
+             set tenant_id = ${tenantB}
+           where id = ${jobId}
+        `),
+      ).rejects.toThrow(/row-level security|policy/i);
     });
   });
 
