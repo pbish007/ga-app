@@ -163,7 +163,13 @@ const FIXTURE_DAYS: FixtureDay[] = [
       { nNumber: "N-002", ownerName: "NEW OWNER LLC" },          // unchanged
       { nNumber: "N-003", ownerName: "FRESH OWNER LLC" },        // unchanged
     ],
-    dereg: ["N-001"],                                            // R3 deregistration
+    // PMB-223 regression: FAA's DEREG.txt is cumulative across decades, so a
+    // single N-NUMBER can legitimately appear multiple times. The duplicate
+    // here ensures change-detect dedupes before the COPY into
+    // aircraft_dereg_staging (PK n_number); without the DuckDB DISTINCT the
+    // COPY would fail with "duplicate key value violates unique constraint
+    // aircraft_dereg_staging_pkey".
+    dereg: ["N-001", "N-001"],
   },
 ];
 
