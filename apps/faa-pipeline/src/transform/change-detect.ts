@@ -206,7 +206,11 @@ export async function runChangeDetect(inputs: ChangeDetectInputs): Promise<Chang
         preamble,
         // DEREG.txt's first column is N-NUMBER (verified in 0022 bronze tests).
         // Quote the identifier exactly — DuckDB preserves header case.
-        `SELECT TRIM("N-NUMBER") AS n_number
+        // DISTINCT: FAA's DEREG.txt is cumulative across decades, so a single
+        // N-NUMBER can legitimately appear multiple times (re-registration /
+        // re-deregistration cycles). Dedupe at the DuckDB read so the COPY
+        // into aircraft_dereg_staging (PK n_number) doesn't trip on a dup.
+        `SELECT DISTINCT TRIM("N-NUMBER") AS n_number
            FROM read_parquet('${inputs.deregBronze}')
           WHERE "N-NUMBER" IS NOT NULL
             AND TRIM("N-NUMBER") <> '';`,
