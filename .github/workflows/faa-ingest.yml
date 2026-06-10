@@ -212,7 +212,9 @@ jobs:
           # Tag creation is idempotent-ish: if a tag for the same date exists,
           # delete and recreate so a re-run points at the latest commit.
           if lakectl tag show "lakefs://$LAKEFS_REPO/$tag" >/dev/null 2>&1; then
-            lakectl tag delete "lakefs://$LAKEFS_REPO/$tag"
+            # lakectl 1.69.0 prompts `Are you sure you want to delete tag? [y/N]`;
+            # CI has no TTY so the prompt aborts. Feed `y` on stdin.
+            echo y | lakectl tag delete "lakefs://$LAKEFS_REPO/$tag"
           fi
           lakectl tag create "lakefs://$LAKEFS_REPO/$tag" "lakefs://$LAKEFS_REPO/$LAKEFS_BRANCH"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
