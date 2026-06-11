@@ -198,7 +198,7 @@ export function NewAircraftForm({ tenantId }: Props) {
             id="aircraft-registration"
             name="registration"
             required
-            placeholder="N12345"
+            placeholder="Type N-Number to search FAA registry"
           />
           {lookupStatus.kind === "loaded" &&
           lookupStatus.response.kind !== "match" ? (

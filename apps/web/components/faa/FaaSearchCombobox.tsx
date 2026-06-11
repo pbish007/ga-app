@@ -52,7 +52,7 @@ interface Props {
 const MIN_QUERY_LEN = 2;
 const DEBOUNCE_MS = 250;
 const LIMIT = 10;
-const OWNER_MAX_CHARS = 24;
+const OWNER_MAX_CHARS = 32;
 
 export function FaaSearchCombobox({
   tenantId,
@@ -244,6 +244,7 @@ export function FaaSearchCombobox({
         role="combobox"
         aria-autocomplete="list"
         aria-expanded={showPanel}
+        aria-busy={status.kind === "loading"}
         aria-controls={listboxId}
         aria-activedescendant={
           showPanel && activeIndex >= 0 ? optionId(activeIndex) : undefined
@@ -267,43 +268,41 @@ export function FaaSearchCombobox({
               aria-label="FAA Registry matches"
               style={listStyle}
             >
-              {status.results.map((row, i) => (
-                <li
-                  key={row.n_number}
-                  id={optionId(i)}
-                  role="option"
-                  aria-selected={activeIndex === i}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    commitSelection(i);
-                  }}
-                  onMouseEnter={() => setActiveIndex(i)}
-                  style={{
-                    ...optionStyle,
-                    background:
-                      activeIndex === i
+              {status.results.map((row, i) => {
+                const isActive = activeIndex === i;
+                return (
+                  <li
+                    key={row.n_number}
+                    id={optionId(i)}
+                    role="option"
+                    aria-selected={isActive ? "true" : "false"}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      commitSelection(i);
+                    }}
+                    onMouseEnter={() => setActiveIndex(i)}
+                    style={{
+                      ...optionStyle,
+                      background: isActive
                         ? faaTokens.surfaceInfoSubtle
                         : "transparent",
-                  }}
-                  data-testid="faa-search-row"
-                >
-                  <span style={nNumberStyle}>N{row.n_number}</span>
-                  <span style={sepStyle} aria-hidden="true">
-                    ·
-                  </span>
-                  <span style={cellStyle}>{row.make ?? "—"}</span>
-                  <span style={sepStyle} aria-hidden="true">
-                    ·
-                  </span>
-                  <span style={cellStyle}>{row.model ?? "—"}</span>
-                  <span style={sepStyle} aria-hidden="true">
-                    ·
-                  </span>
-                  <span style={ownerStyle} title={row.owner_name ?? ""}>
-                    {truncate(row.owner_name ?? "—", OWNER_MAX_CHARS)}
-                  </span>
-                </li>
-              ))}
+                      borderLeftColor: isActive
+                        ? faaTokens.textInfo
+                        : "transparent",
+                      fontWeight: isActive ? 500 : 400,
+                    }}
+                    data-testid="faa-search-row"
+                  >
+                    <span style={nNumberStyle}>N{row.n_number}</span>
+                    <span
+                      style={secondaryLineStyle}
+                      title={row.owner_name ?? ""}
+                    >
+                      {buildSecondaryLine(row)}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           ) : null}
 
@@ -314,7 +313,8 @@ export function FaaSearchCombobox({
               data-testid="faa-search-empty"
               style={emptyRowStyle}
             >
-              No FAA matches — keep typing or enter manually
+              No results found — try a longer N-Number, or enter registration
+              manually
             </div>
           ) : null}
 
@@ -340,13 +340,23 @@ function truncate(str: string, max: number): string {
   return str.slice(0, Math.max(0, max - 1)) + "…";
 }
 
+function buildSecondaryLine(row: FaaSearchResult): string {
+  const parts: string[] = [];
+  if (row.make) parts.push(row.make);
+  if (row.model) parts.push(row.model);
+  if (row.year_mfr != null) parts.push(String(row.year_mfr));
+  if (row.owner_name) parts.push(truncate(row.owner_name, OWNER_MAX_CHARS));
+  return parts.length > 0 ? parts.join(" · ") : "—";
+}
+
 function Spinner() {
   return (
     <svg
       width="14"
       height="14"
       viewBox="0 0 24 24"
-      aria-hidden="true"
+      role="img"
+      aria-label="Searching FAA registry"
       data-testid="faa-search-spinner"
     >
       <circle
@@ -404,40 +414,31 @@ const listStyle: CSSProperties = {
 
 const optionStyle: CSSProperties = {
   display: "flex",
-  alignItems: "center",
-  gap: "0.5rem",
-  padding: "0.6rem 0.75rem",
+  flexDirection: "column",
+  gap: "0.125rem",
+  padding: "0.75rem 1rem",
   minHeight: 44,
   cursor: "pointer",
   borderBottom: "1px solid #f1f5f9",
-  fontSize: "0.95rem",
+  borderLeft: "3px solid transparent",
   lineHeight: 1.3,
 };
 
 const nNumberStyle: CSSProperties = {
-  fontWeight: 600,
+  fontWeight: 500,
   fontVariantNumeric: "tabular-nums",
   whiteSpace: "nowrap",
+  fontSize: "0.875rem",
+  color: "#111827",
 };
 
-const sepStyle: CSSProperties = {
+const secondaryLineStyle: CSSProperties = {
+  fontSize: "0.75rem",
   color: faaTokens.textSecondary,
-};
-
-const cellStyle: CSSProperties = {
   whiteSpace: "nowrap",
   overflow: "hidden",
   textOverflow: "ellipsis",
   minWidth: 0,
-};
-
-const ownerStyle: CSSProperties = {
-  marginLeft: "auto",
-  color: faaTokens.textSecondary,
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  fontSize: "0.9rem",
 };
 
 const loadingRowStyle: CSSProperties = {
