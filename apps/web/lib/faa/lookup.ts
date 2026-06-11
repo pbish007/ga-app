@@ -1,5 +1,11 @@
 import type { FaaSql } from "./client.js";
-import type { FaaLookupResult, FaaAircraftLookupValue, FaaFreshness } from "./types.js";
+import type {
+  FaaAircraftLookupValue,
+  FaaAircraftSearchResult,
+  FaaFreshness,
+  FaaLookupResult,
+  FaaSearchResponse,
+} from "./types.js";
 
 /**
  * Tolerant N-number normalizer. Strips leading/trailing whitespace,
@@ -119,6 +125,69 @@ function shapeAircraft(row: RawAircraftRow): FaaAircraftLookupValue {
 
 function emptyToNull(value: string): string | null {
   return value.length === 0 ? null : value;
+}
+
+export interface LookupAircraftSearchInput {
+  /** Normalized N-number prefix (1–5 alphanumeric, no leading 'N'). */
+  q: string;
+  /** Max rows to return; route caller is responsible for clamping. */
+  limit: number;
+}
+
+/**
+ * Prefix-search the FAA Registry by N-number. The `q` value is bound as
+ * a SQL parameter; the trailing `%` is appended in code so the B-tree
+ * on `n_number` can serve the LIKE pattern as an index scan. We never
+ * accept a user-supplied wildcard — the boundary regex (`/^[A-Z0-9]+$/`
+ * enforced via {@link isValidNNumber}) rejects `%` and `_` before this
+ * helper sees the value.
+ *
+ * Freshness is returned alongside the rows so the FE picklist can
+ * render the same "Last synced" pill the R4 lookup uses. Errors
+ * (including the freshness query) propagate; the route handler shapes
+ * them into the `lookup_unavailable` envelope.
+ */
+export async function lookupAircraftSearch(
+  deps: LookupAircraftDeps,
+  input: LookupAircraftSearchInput,
+): Promise<FaaSearchResponse> {
+  const freshness = await loadFreshness(deps.sql);
+  const pattern = `${input.q}%`;
+  const rows = await deps.sql<Array<RawSearchRow>>`
+    select
+      n_number,
+      coalesce(mfr_name, '')    as make,
+      coalesce(model_name, '')  as model,
+      owner_name,
+      year_mfr
+    from faa_registry.aircraft_registry_current
+    where n_number like ${pattern}
+    order by n_number
+    limit ${input.limit}
+  `;
+  return {
+    kind: "results",
+    results: rows.map(shapeSearchRow),
+    freshness,
+  };
+}
+
+interface RawSearchRow {
+  n_number: string;
+  make: string;
+  model: string;
+  owner_name: string | null;
+  year_mfr: number | null;
+}
+
+function shapeSearchRow(row: RawSearchRow): FaaAircraftSearchResult {
+  return {
+    n_number: row.n_number,
+    make: emptyToNull(row.make),
+    model: emptyToNull(row.model),
+    owner_name: row.owner_name,
+    year_mfr: row.year_mfr,
+  };
 }
 
 async function loadFreshness(sql: FaaSql): Promise<FaaFreshness> {

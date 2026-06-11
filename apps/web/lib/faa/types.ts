@@ -53,3 +53,24 @@ export type FaaLookupResult =
       n_number: string;
       freshness: FaaFreshness;
     };
+
+/**
+ * Slim row returned from the prefix-search endpoint (PMB-237). The FE
+ * picklist needs enough to disambiguate identical owners across model
+ * years — n_number, make, model, owner_name, year — and nothing more.
+ * Pulling the full lookup shape on every keystroke would inflate both
+ * payload and Postgres CPU on the hot index path.
+ */
+export interface FaaAircraftSearchResult {
+  n_number: string;
+  make: string | null;
+  model: string | null;
+  owner_name: string | null;
+  year_mfr: number | null;
+}
+
+export interface FaaSearchResponse {
+  kind: "results";
+  results: FaaAircraftSearchResult[];
+  freshness: FaaFreshness;
+}
