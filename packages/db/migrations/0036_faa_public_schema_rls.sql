@@ -1,4 +1,5 @@
 -- 0036_faa_public_schema_rls.sql
+-- @scope: faa-supabase
 -- PMB-232 — close the FAA Supabase `rls_disabled_in_public` advisor finding.
 --
 -- Target: FAA Supabase project `idjhuqubjgjloywsfgtu`.

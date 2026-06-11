@@ -1,4 +1,5 @@
 -- FAA Registry schema (PMB-104 R0)
+-- @scope: faa-supabase
 -- Lives in a separate Supabase project (FAA_DATABASE_URL), NOT the tenant DB.
 -- This migration is checked into the monorepo for documentation and can be
 -- applied to the FAA Supabase project via the provisioning runbook.
