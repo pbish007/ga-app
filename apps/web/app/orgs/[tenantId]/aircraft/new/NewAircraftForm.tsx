@@ -194,7 +194,7 @@ export function NewAircraftForm({ tenantId }: Props) {
             tenantId={tenantId}
             value={registration}
             onChange={setRegistration}
-            onSelect={(picked) => setRegistration(picked.n_number)}
+            onSelect={(picked) => setRegistration("N" + picked.n_number)}
             id="aircraft-registration"
             name="registration"
             required

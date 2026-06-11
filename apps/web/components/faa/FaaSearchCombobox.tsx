@@ -240,6 +240,12 @@ export function FaaSearchCombobox({
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
+        onBlur={(e) => {
+          if (!containerRef.current?.contains(e.relatedTarget as Node)) {
+            setOpen(false);
+            setActiveIndex(-1);
+          }
+        }}
         onKeyDown={handleKeyDown}
         role="combobox"
         aria-autocomplete="list"
