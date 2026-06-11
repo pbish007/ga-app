@@ -77,6 +77,18 @@ for sql_file in "$migrations_dir"/*.sql; do
   [[ -e "$sql_file" ]] || continue
   filename="$(basename "$sql_file")"
 
+  # Skip migrations explicitly scoped to the FAA Supabase project. They are
+  # applied manually via .github/workflows/faa-db-migrate.yml against
+  # FAA_DATABASE_URL and reference Supabase platform roles (anon,
+  # authenticated, service_role) and lakeFS-owned schemas that do not exist
+  # on the tenant Neon database. The pglite test bootstrap honors the same
+  # marker (see packages/db/src/test/pglite.ts).
+  if head -n 30 "$sql_file" | grep -qE '@scope:[[:space:]]*faa-supabase'; then
+    echo "  skip  $filename (FAA-Supabase-scoped)"
+    skipped=$((skipped + 1))
+    continue
+  fi
+
   already="$("${PSQL[@]}" --tuples-only --no-align <<SQL
 SELECT 1 FROM schema_migrations WHERE filename = '$filename';
 SQL
