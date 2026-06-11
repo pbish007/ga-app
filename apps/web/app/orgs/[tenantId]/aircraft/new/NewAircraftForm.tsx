@@ -7,6 +7,7 @@ import type { FaaFieldKey } from "@ga/db";
 
 import { FaaFreshnessPill } from "../../../../../components/faa/FaaFreshnessPill";
 import { FaaLookupBanner } from "../../../../../components/faa/FaaLookupBanner";
+import { FaaSearchCombobox } from "../../../../../components/faa/FaaSearchCombobox";
 import { SourceConflictChip } from "../../../../../components/faa/SourceConflictChip";
 import type {
   FaaFieldReportReason,
@@ -185,22 +186,25 @@ export function NewAircraftForm({ tenantId }: Props) {
       ) : null}
 
       <div style={fieldRowStyle}>
-        <label style={s.field}>
-          <span style={s.label}>Registration (N-number)</span>
-          <input
+        <div style={s.field}>
+          <label htmlFor="aircraft-registration" style={s.label}>
+            Registration (N-number)
+          </label>
+          <FaaSearchCombobox
+            tenantId={tenantId}
+            value={registration}
+            onChange={setRegistration}
+            onSelect={(picked) => setRegistration(picked.n_number)}
+            id="aircraft-registration"
             name="registration"
             required
-            style={s.input}
             placeholder="N12345"
-            autoComplete="off"
-            value={registration}
-            onChange={(e) => setRegistration(e.target.value)}
           />
           {lookupStatus.kind === "loaded" &&
           lookupStatus.response.kind !== "match" ? (
             <FaaLookupBanner response={lookupStatus.response} onRetry={retry} />
           ) : null}
-        </label>
+        </div>
 
         {FIELD_LABELS.map(({ key, label }) => (
           <label key={key} style={s.field}>
