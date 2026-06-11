@@ -1,4 +1,5 @@
 -- FAA Registry: SCD-2 aircraft_registry redesign (PMB-203 R2).
+-- @scope: faa-supabase
 -- Lives in the FAA Supabase project (FAA_DATABASE_URL), NOT the tenant DB.
 --
 -- Drop+recreate is safe because the 0022 tables hold zero rows today

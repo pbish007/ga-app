@@ -37,10 +37,22 @@ const CATALOG_TABLES = new Set<string>([
   "app_role_permissions",
 ]);
 
+// Migrations whose header declares `-- @scope: faa-supabase` target the FAA
+// Supabase project (FAA_DATABASE_URL) and are applied manually via
+// faa-db-migrate.yml. They must NOT run against the tenant DB shape: they
+// REVOKE/GRANT against Supabase platform roles that don't exist on tenant
+// (anon/authenticated/service_role) and enable RLS on tables tenant_app
+// reads. Production tenant Neon (packages/db/scripts/migrate.sh) applies the
+// same skip rule.
+function isFaaSupabaseScoped(sql: string): boolean {
+  return /@scope:\s*faa-supabase\b/i.test(sql.slice(0, 2000));
+}
+
 async function applyMigrations(pg: PGlite): Promise<void> {
   for (const file of readdirSync(migrationsDir).sort()) {
     if (!file.endsWith(".sql")) continue;
     const sql = readFileSync(resolve(migrationsDir, file), "utf8");
+    if (isFaaSupabaseScoped(sql)) continue;
     await pg.exec(sql);
   }
 }

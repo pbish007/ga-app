@@ -1,4 +1,5 @@
 -- FAA Registry: extend snapshot_manifest with per-file byte length + sha256 (PMB-105 R1).
+-- @scope: faa-supabase
 -- Lives in the FAA Supabase project (FAA_DATABASE_URL), NOT the tenant DB.
 -- Acceptance criteria for PMB-105 require sha256 in the manifest so a re-download
 -- can be byte-compared against the recorded fingerprint.

@@ -1,4 +1,5 @@
 -- FAA Registry: pipeline-vs-runtime role separation (PMB-110 AC4).
+-- @scope: faa-supabase
 -- Lives in the FAA Supabase project (FAA_DATABASE_URL), NOT the tenant DB.
 --
 -- Least-privilege boundary:

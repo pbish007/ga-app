@@ -1,5 +1,6 @@
 -- FAA Registry: extend snapshot_manifest with transform-pipeline bookkeeping
 -- (PMB-203 R2). Lives in the FAA Supabase project (FAA_DATABASE_URL).
+-- @scope: faa-supabase
 --
 -- Idempotent: `add column if not exists` so re-runs against an already-
 -- migrated DB are safe.

@@ -1,4 +1,5 @@
 -- FAA Registry: faa_registry_audit_log (PMB-110 PM addendum, CTO refinement).
+-- @scope: faa-supabase
 -- Lives in the FAA Supabase project (FAA_DATABASE_URL), NOT the tenant DB.
 --
 -- Why: maintenance-app reads of faa_registry.* go through a service-role
