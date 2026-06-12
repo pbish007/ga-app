@@ -33,3 +33,4 @@ next real incident.
 | timestamp_utc | trigger | restore_s | verify_s | total_s | tables_matched | server_version | run |
 | ------------- | ------- | --------- | -------- | ------- | -------------- | -------------- | --- |
 | 2026-05-27T19:00:00Z | manual | 11 | 23 | 34 | 28/28 | 17.10 | [PMB-22](/PMB/issues/PMB-22) |
+| 2026-06-04T15:51:44Z | workflow_dispatch | 5 | 28 | 33 | 28/28 | 17.10(6a49db4) | [run](https://github.com/pbish007/ga-app/actions/runs/26963072334) |
